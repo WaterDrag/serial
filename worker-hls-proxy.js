@@ -57,6 +57,13 @@ export default {
     // SledujSerialy CORS proxy
     if (url.pathname.startsWith('/sledujserialy')) return handleSledujSerialyProxy(request, url);
 
+    // Hanime.tv API proxy
+    if (url.pathname.startsWith('/hanime')) return handleHanimeProxy(request, url, 'https://hanime.tv');
+    // Hanime search API proxy
+    if (url.pathname.startsWith('/hsearch')) return handleHanimeProxy(request, url, 'https://search.hanime.tv');
+    // streamable.cloud HLS proxy (hanime CDN)
+    if (url.pathname.startsWith('/scloud')) return handleHanimeProxy(request, url, 'https://streamable.cloud');
+
     // SVT (svetserialu.io) proxy
     return handleSvtProxy(request, env, url);
   },
@@ -161,17 +168,46 @@ async function handleAnimePaheProxy(request, reqUrl, env) {
   });
 }
 
+/* ── hanime.tv / search.hanime.tv proxy ─────────────────────────── */
+async function handleHanimeProxy(request, reqUrl, base) {
+  const prefixMap = {'https://hanime.tv': '/hanime', 'https://search.hanime.tv': '/hsearch', 'https://streamable.cloud': '/scloud'};
+  const prefix = prefixMap[base] || '/hanime';
+  const path = reqUrl.pathname.replace(new RegExp('^' + prefix), '') || '/';
+  const target = base + path + reqUrl.search;
+  const headers = {
+    'User-Agent': PROXY_UA,
+    'Referer': 'https://hanime.tv/',
+    'Origin': 'https://hanime.tv',
+    'Accept': 'application/json, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+  };
+  let upstream;
+  try {
+    upstream = await fetch(target, { headers, redirect: 'follow', signal: AbortSignal.timeout(15000) });
+  } catch (e) {
+    return new Response('Hanime fetch error: ' + e.message, { status: 502, headers: corsHeaders() });
+  }
+  const ct = upstream.headers.get('Content-Type') || 'application/json';
+  return new Response(await upstream.text(), {
+    status: upstream.status,
+    headers: corsHeaders({ 'Content-Type': ct, 'Cache-Control': 'no-store' }),
+  });
+}
+
 /* ── sledujserialy.io proxy ─────────────────────────────────────── */
 async function handleSledujSerialyProxy(request, reqUrl) {
   const path = reqUrl.pathname.replace(/^\/sledujserialy/, '') || '/';
   const target = 'https://sledujserialy.io' + path + reqUrl.search;
+  const isPageRequest = request.method === 'GET' && !path.endsWith('.php');
   const headers = {
     'User-Agent': PROXY_UA,
     'Referer': 'https://sledujserialy.io/',
     'Origin': 'https://sledujserialy.io',
-    'Accept': 'application/json, */*',
+    'Accept': isPageRequest
+      ? 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      : 'application/json, */*',
     'Accept-Language': 'cs,sk;q=0.9,en-US;q=0.8',
-    'X-Requested-With': 'XMLHttpRequest',
+    ...(isPageRequest ? {} : { 'X-Requested-With': 'XMLHttpRequest' }),
   };
   let body = null;
   if (request.method !== 'GET' && request.method !== 'HEAD') {
