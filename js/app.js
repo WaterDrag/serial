@@ -679,6 +679,35 @@ async function findSledujSerialySlug(anime){
 function buildSsEpUrl(slug,season,ep){
   return`https://sledujserialy.io/cz/episode/${slug}-s${String(season).padStart(2,'0')}e${String(ep).padStart(2,'0')}`;
 }
+function parseSsEpList(html,slug,season){
+  const re=/class="s2-episode-link"\s+href="[^"]*-(s\d{2}e(\d{2,3}))"\s*>\s*\d+\.\s*([^<\n]+)/g;
+  const eps=[];let m;
+  while((m=re.exec(html))!==null){
+    const code=m[1];const epNum=parseInt(m[2]);const rawTitle=m[3].trim();
+    const seg=html.slice(Math.max(0,m.index-50),m.index+600);
+    eps.push({number:epNum,title:rawTitle||`Epizoda ${epNum}`,code,slug:'__ss__',season,ssSlug:slug,ssUrl:buildSsEpUrl(slug,season,epNum),hasCz:seg.includes('fa-cc')});
+  }
+  return eps;
+}
+async function probeSledujSerialy(anime,onProgress){
+  if(onProgress)onProgress('Hledám na SledujSerialy…');
+  const slug=await findSledujSerialySlug(anime);
+  if(!slug)return null;
+  if(onProgress)onProgress(`Načítám epizody (${slug})…`);
+  const html1=await fetch(getProxy()+'/sledujserialy/cz/episode/'+slug+'-s01e01',{signal:AbortSignal.timeout(12000)}).then(r=>r.ok?r.text():null).catch(()=>null);
+  if(!html1)return null;
+  const seasonMatches=[...html1.matchAll(/href="[^"]*\/episode\/[^"]*-s(\d{2})e01"/g)];
+  const seasonNums=[...new Set(seasonMatches.map(m=>parseInt(m[1])))].sort((a,b)=>a-b);
+  if(!seasonNums.length)seasonNums.push(1);
+  const allEps=parseSsEpList(html1,slug,seasonNums[0]);
+  if(seasonNums.length>1){
+    const htmls=await Promise.all(seasonNums.slice(1).map(s=>
+      fetch(getProxy()+'/sledujserialy/cz/episode/'+slug+'-s'+String(s).padStart(2,'0')+'e01',{signal:AbortSignal.timeout(12000)}).then(r=>r.ok?r.text():null).catch(()=>null)
+    ));
+    htmls.forEach((html,i)=>{if(html)allEps.push(...parseSsEpList(html,slug,seasonNums[i+1]));});
+  }
+  return allEps.length?{slug,episodes:allEps,seasons:seasonNums}:null;
+}
 
 function resolveIframeUrl(b64){
   let decoded;try{decoded=atob(b64);}catch(e){throw new Error('Neplatný base64');}
@@ -1759,6 +1788,7 @@ function animeggLoadSource(url,btn){
 
 function currentModeKey(){
   if(state.provider==='animegg')return 'animegg';
+  if(state.provider==='ss')return 'ss';
   return 'svt';
 }
 function renderModeSwitch(){
@@ -1766,6 +1796,7 @@ function renderModeSwitch(){
   const btns=[];
   if(state.modes.svt)btns.push({mode:'svt',label:'🇨🇿 CZ / SK',sub:'svetserialu'});
   if(state.modes.animegg)btns.push({mode:'animegg',label:'🌐 EN sub',sub:'AnimeGG'});
+  if(state.modes.ss)btns.push({mode:'ss',label:'🔗 SK / CZ',sub:'sledujserialy'});
   if(btns.length<=1){el.style.display='none';return;}
   el.style.display='flex';
   const cur=currentModeKey();
@@ -1785,6 +1816,15 @@ function activateMode(mode){
     state.episodes=state.animeggEpisodes;
     const tabs=document.getElementById('seasonTabs');
     if(tabs)tabs.style.display='none';
+  }else if(mode==='ss'){
+    state.provider='ss';
+    const bySeason={};
+    state.ssEpisodes.forEach(ep=>{if(!bySeason[ep.season])bySeason[ep.season]=[];bySeason[ep.season].push(ep);});
+    Object.entries(bySeason).forEach(([s,eps])=>{state.allSeasons[s]=eps;});
+    state.availableSeasons=Object.keys(bySeason).map(Number).sort((a,b)=>a-b);
+    state.currentSeason=state.availableSeasons[0]||1;
+    state.episodes=bySeason[state.currentSeason]||state.ssEpisodes;
+    renderSeasonTabs();
   }
   renderEpList();setupMainPlayBtn();renderModeSwitch();updateMarkSeasonBtn();
 }
@@ -1807,7 +1847,10 @@ async function switchSeason(season){
   const sel=document.querySelector('.season-select');if(sel)sel.value=season;
   document.getElementById('epList').innerHTML=`<li style="padding:20px;text-align:center;color:var(--text-3);"><div class="spinner" style="width:20px;height:20px;border-width:2px;margin:0 auto;"></div></li>`;
   try{
-    if(!state.allSeasons[season])state.allSeasons[season]=await svtEpisodes(state.svtSlug,season,state.svtTvShowId);
+    if(!state.allSeasons[season]){
+      if(state.provider==='ss')throw new Error('Sezóna nenačtena');
+      state.allSeasons[season]=await svtEpisodes(state.svtSlug,season,state.svtTvShowId);
+    }
     state.episodes=state.allSeasons[season];state.currentEp=null;
     renderEpList();setupMainPlayBtn();
   }catch(e){document.getElementById('epList').innerHTML=`<li style="color:var(--danger);padding:20px;text-align:center;">Chyba: ${e.message}</li>`;}
@@ -1985,10 +2028,10 @@ async function initAnimePage(){
   catch(e){setMsg(`Chyba: ${e.message}`);return;}
 
   state.currentAnime={id:anime.id,title:getTitle(anime),cover:anime.coverImage?.large||anime.coverImage?.extraLarge,genres:anime.genres||[],score:anime.averageScore,year:anime.seasonYear,format:anime.format};
-  state.provider='svt';state.modes={svt:false,animegg:false};
+  state.provider='svt';state.modes={svt:false,animegg:false,ss:false};
   state.allSeasons={};state.availableSeasons=[];state.currentSeason=1;
-  state.episodes=[];state.svtEpisodes=[];state.animeggEpisodes=[];
-  state.svtSlug=null;state.svtTvShowId=null;state.svtIsDub=false;state.animeggSlug=null;state.animeggHasDub=false;state.animeggIsDub=false;
+  state.episodes=[];state.svtEpisodes=[];state.animeggEpisodes=[];state.ssEpisodes=[];
+  state.svtSlug=null;state.svtTvShowId=null;state.svtIsDub=false;state.animeggSlug=null;state.animeggHasDub=false;state.animeggIsDub=false;state.ssSlug=null;
 
   addHistory(state.currentAnime);
   document.title=`${state.currentAnime.title} — WaterStream`;
@@ -2040,10 +2083,17 @@ async function initAnimePage(){
     activateMode('animegg');
     showSvtManualBanner();
   }else{
-    setMsg('Anime není dostupné v žádném ze zdrojů.');
-    document.getElementById('mainPlayBtn').disabled=true;
-    document.getElementById('mainPlayBtnText').textContent='Nedostupné';
-    showSvtManualBanner();
+    const ssResult=await probeSledujSerialy(anime,setMsg);
+    if(ssResult){
+      state.ssSlug=ssResult.slug;state.ssEpisodes=ssResult.episodes;state.modes.ss=true;
+      activateMode('ss');
+      showSvtManualBanner();
+    }else{
+      setMsg('Anime není dostupné v žádném ze zdrojů.');
+      document.getElementById('mainPlayBtn').disabled=true;
+      document.getElementById('mainPlayBtnText').textContent='Nedostupné';
+      showSvtManualBanner();
+    }
   }
   renderModeSwitch();
 }
@@ -2082,6 +2132,18 @@ async function playEp(index){
   if(epLabel)epLabel.textContent=`Ep. ${ep.number}${ep.title&&ep.title!==`Epizoda ${ep.number}`?' — '+ep.title:''}`;
 
   if(ep.slug==='__animegg__'){await playAnimeggEp(ep,wrap,ph);return;}
+
+  if(ep.slug==='__ss__'){
+    ph.style.display='flex';
+    ph.innerHTML=`<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent-h)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M10 8l6 4-6 4V8z" fill="var(--accent-h)" stroke="none"/></svg>
+    <span style="color:var(--text-1);font-weight:700;font-size:15px;">Přehrát na SledujSerialy</span>
+    <span style="color:var(--text-3);font-size:13px;">Epizoda ${ep.number}${ep.hasCz?' · CZ titulky':''}</span>
+    <a href="${ep.ssUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:#fff;text-decoration:none;border-radius:var(--r-md);padding:12px 28px;font-size:14px;font-weight:800;margin-top:4px;">
+      Otevřít epizodu ↗
+    </a>
+    <span style="color:var(--text-3);font-size:11px;opacity:.6;">Otevře se na sledujserialy.io v novém okně</span>`;
+    return;
+  }
 
   if(ep.slug==='__unavailable__'){
     const _t=encodeURIComponent(getTitle(state.currentAnime));
