@@ -1138,7 +1138,105 @@ function updateManualSub(val){
   if(val.trim()){overlay.style.display='block';el.textContent=val;}
   else{el.textContent='';overlay.style.display='none';}
 }
-Object.assign(window,{toggleAiSubs,toggleSubPause,seekSubToInput,downloadSubs,toggleManualSub,updateManualSub,_markNotifRead});
+Object.assign(window,{toggleAiSubs,toggleSubPause,seekSubToInput,downloadSubs,toggleManualSub,updateManualSub,_markNotifRead,_markSvtNotifRead});
+/* ══ SVT notifikace (localStorage) ══════════════════════════════════════ */
+const _SVT_NOTIFS_KEY='svt_notifs_v2';
+const _SVT_EP_SEEN='svt_ep_';
+const _SVT_CHECK_TS='svt_notif_ts';
+const _SVT_CHECK_INTERVAL=2*3600*1000;
+function _getSvtNotifs(){try{return JSON.parse(localStorage.getItem(_SVT_NOTIFS_KEY)||'[]');}catch{return[];}}
+function _saveSvtNotifs(arr){localStorage.setItem(_SVT_NOTIFS_KEY,JSON.stringify(arr));}
+function _markSvtNotifRead(key){_saveSvtNotifs(_getSvtNotifs().map(n=>n.key===key?{...n,read:true}:n));}
+function initNotifBadge(){_updateNotifBadge(_getSvtNotifs().filter(n=>!n.read).length);}
+function _svtPageHasCzSubs(html){
+  // Subtitle files (.srt / .vtt / .ass)
+  if(/\.(srt|vtt|ass|ssa)['"]/i.test(html))return true;
+  // HTML track element with Czech/Slovak srclang
+  if(/srclang=["'](cs|sk)["']/i.test(html))return true;
+  // JSON data with language field
+  if(/"language"\s*:\s*["'](cs|sk|cz)["']/i.test(html))return true;
+  // "titulky" near cz/cs/sk keyword within 200 chars
+  const lo=html.toLowerCase();
+  let idx=lo.indexOf('titulky');
+  while(idx!==-1){
+    const ctx=lo.slice(Math.max(0,idx-80),idx+200);
+    if(/\b(cz|cs|sk|czech|česk|slovenk)\b/.test(ctx))return true;
+    idx=lo.indexOf('titulky',idx+1);
+  }
+  // Data attribute or class indicating CZ subtitles
+  if(/data-lang=["'](cs|sk|cz)["']/i.test(html))return true;
+  return false;
+}
+async function _createSvtNotif(fav,meta,ep){
+  const s2=String(ep.s).padStart(2,'0'),e2=String(ep.e).padStart(2,'0');
+  const key=`${fav.id}_s${s2}e${e2}_tit`;
+  const existing=_getSvtNotifs();
+  if(existing.find(n=>n.key===key))return;
+  let poster=null;
+  try{const td=await tmdbFetch(`/tv/${fav.id}`);poster=td?.poster_path||null;}catch{}
+  existing.push({key,showId:fav.id,showName:fav.title||'—',showPoster:poster,isDub:meta.isDub||false,season:ep.s,episode:ep.e,ts:Date.now(),read:false});
+  _saveSvtNotifs(existing);
+}
+async function checkSvtNotificationsBackground(){
+  const lastCheck=parseInt(localStorage.getItem(_SVT_CHECK_TS)||'0');
+  if(Date.now()-lastCheck<_SVT_CHECK_INTERVAL)return;
+  const favs=getFavs();
+  if(!favs.length)return;
+  const slugMeta=await Promise.allSettled(favs.slice(0,20).map(f=>getGlobalSvtSlug(f.id)));
+  for(let idx=0;idx<Math.min(favs.length,20);idx++){
+    const fav=favs[idx];
+    const meta=slugMeta[idx].status==='fulfilled'?slugMeta[idx].value:null;
+    if(!meta?.slug)continue;
+    try{
+      // 1) Načti stránku seriálu pro seznam epizod
+      const res=await fetch(getProxy()+'/serial/'+encodeURIComponent(meta.slug),{signal:AbortSignal.timeout(10000)});
+      if(!res.ok)continue;
+      const html=await res.text();
+      // Extrahuj URL epizod + čísla sérií/epizod ze stránky seriálu
+      // SVT formát: href="/serial/{slug}/s04e11"
+      const seenEps=new Set();const eps=[];
+      const re=/href="(\/serial\/[^"]*?\/s(\d+)e(\d+))"/gi;
+      let m;
+      while((m=re.exec(html))!==null){
+        const s=parseInt(m[2]),e=parseInt(m[3]),k=`${s}_${e}`;
+        if(!seenEps.has(k)){
+          seenEps.add(k);
+          // SVT zobrazuje "episode-cc" třídu přímo v listingu → není potřeba fetch epizody
+          const ctx=html.slice(m.index,m.index+1000);
+          eps.push({path:m[1],s,e,hasSubs:/episode-cc/.test(ctx)});
+        }
+      }
+      if(!eps.length)continue;
+      eps.sort((a,b)=>b.s!==a.s?b.s-a.s:b.e-a.e);
+      // 2) Je to první scan pro tento seriál?
+      const seenKey=_SVT_EP_SEEN+meta.slug;
+      const seenState=JSON.parse(localStorage.getItem(seenKey)||'null');
+      const isFirstScan=!seenState;
+      // Ulož nejnovější epizodu
+      const latest=eps[0];
+      if(!seenState||(latest.s>seenState.s||(latest.s===seenState.s&&latest.e>seenState.e)))
+        localStorage.setItem(seenKey,JSON.stringify({s:latest.s,e:latest.e}));
+      // 3) Zkontroluj titulky posledních 5 epizod (no extra fetches needed)
+      for(const ep of eps.slice(0,5)){
+        const subKey=`svt_sub_${meta.slug}_${ep.s}_${ep.e}`;
+        const subState=JSON.parse(localStorage.getItem(subKey)||'null');
+        if(subState?.hasSubs)continue;
+        const hasSubs=ep.hasSubs;
+        if(isFirstScan){
+          localStorage.setItem(subKey,JSON.stringify({hasSubs,ts:Date.now()}));
+        }else if(!subState){
+          localStorage.setItem(subKey,JSON.stringify({hasSubs,ts:Date.now()}));
+          if(hasSubs)await _createSvtNotif(fav,meta,ep);
+        }else if(!subState.hasSubs&&hasSubs){
+          localStorage.setItem(subKey,JSON.stringify({hasSubs:true,ts:Date.now()}));
+          await _createSvtNotif(fav,meta,ep);
+        }
+      }
+    }catch(e){console.warn('[SVT notif]',meta.slug,e.message);}
+  }
+  localStorage.setItem(_SVT_CHECK_TS,Date.now().toString());
+  _updateNotifBadge(_getSvtNotifs().filter(n=>!n.read).length);
+}
 function getPreferredSourceIndex(sources){
   const pref=getDefaultSource();
   if(pref!=='auto'){const idx=sources.findIndex(s=>s.provider.toLowerCase()===pref.toLowerCase());if(idx>=0)return idx;}
@@ -1172,6 +1270,7 @@ function initSearch(){
     },400);
   });
   document.addEventListener('click',e=>{if(!e.target.closest('.search-wrap'))res.classList.remove('open');});
+  initNotifBadge();
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1218,66 +1317,36 @@ function _updateNotifBadge(count){
     }else if(badge){badge.remove();}
   });
 }
-async function loadNotifDropdown(){
+function loadNotifDropdown(){
   const body=document.getElementById('notifDropdownBody');if(!body)return;
-  body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3);font-size:13px;display:flex;align-items:center;justify-content:center;gap:8px;"><div class="spinner" style="width:16px;height:16px;border-width:2px;flex-shrink:0;"></div> Načítám…</div>';
-  const favs=getFavs();
-  if(!favs.length){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3);font-size:13px;">Žádné oblíbené anime</div>';return;}
-  const _notifTimeout=new Promise((_,rej)=>setTimeout(()=>rej(new Error('TIMEOUT')),10000));
-  try{
-    await Promise.race([_notifTimeout,(async()=>{
-    const sevenDays=7*24*3600*1000,now=Date.now();
-    const results=await Promise.allSettled(favs.slice(0,20).map(f=>tmdbFetch(`/tv/${f.id}`)));
-    const read=_getReadNotifs();
-    const rawItems=[];
-    results.forEach(r=>{
-      if(r.status!=='fulfilled')return;
-      const show=r.value,ep=show.last_episode_to_air;
-      if(!ep?.air_date)return;
-      const age=now-new Date(ep.air_date).getTime();
-      if(age>sevenDays)return;
-      const s=String(ep.season_number).padStart(2,'0');
-      const e=String(ep.episode_number).padStart(2,'0');
-      const key=`${show.id}_s${s}e${e}`;
-      rawItems.push({show,ep,age,key,read:read.has(key)});
-    });
-    // Fetch isDub from Firestore for each show
-    const svtMeta=await Promise.allSettled(rawItems.map(i=>getGlobalSvtSlug(i.show.id)));
-    const items=rawItems.map((item,idx)=>{
-      const meta=svtMeta[idx].status==='fulfilled'?svtMeta[idx].value:null;
-      return{...item,hasSvt:!!meta,isDub:meta?.isDub??false};
-    });
-    const unreadCount=items.filter(i=>!i.read).length;
-    _updateNotifBadge(unreadCount);
-    if(!items.length){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3);font-size:13px;">Žádné nové epizody v posledních 7 dnech</div>';return;}
-    items.sort((a,b)=>a.read-b.read||a.age-b.age);
-    body.innerHTML=items.map(({show,ep,age,key,read,hasSvt,isDub})=>{
-      const title=show.name||'—';
-      const s=String(ep.season_number).padStart(2,'0');
-      const e=String(ep.episode_number).padStart(2,'0');
-      const epCode=`s${s}e${e}`;
-      const timeAgo=_notifTimeAgo(age);
-      const titBadge=hasSvt?'<span class="ep-lang-btn tit" style="font-size:9px;padding:2px 6px;pointer-events:none;">TIT</span>':'';
-      const dabBadge=isDub?'<span class="ep-lang-btn dab" style="font-size:9px;padding:2px 6px;pointer-events:none;">DAB</span>':'';
-      const badges=titBadge+dabBadge;
-      const desc=isDub?'Přidané titulky a dabing do epizody':'Přidané titulky do epizody';
-      const cover=show.poster_path?TMDB_IMG+show.poster_path:'';
-      const opacity=read?'opacity:.45;':'';
-      return `<div class="notif-dd-item" style="${opacity}" onclick="_markNotifRead('${key}');document.getElementById('notifDropdown')?.remove();window.location.href='watch.html?id=${show.id}&ep=${ep.episode_number}&season=${ep.season_number}'">
-        <img src="${cover}" class="notif-dd-thumb">
-        <div class="notif-dd-info">
-          <div class="notif-dd-title">${title} <span style="color:var(--text-3);font-weight:600;">- ${epCode}</span></div>
-          <div class="notif-dd-sub">${timeAgo} ${badges||'<span style="color:var(--text-3);font-size:9px;">CZ neznámo</span>'}</div>
-          <div class="notif-dd-desc">${desc}</div>
-        </div>
-      </div>`;
-    }).join('');
-    })()]);
-  }catch(e){
-    if(e.message==='TIMEOUT'){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--danger);font-size:13px;">Načítání trvalo příliš dlouho — zkus to znovu</div>';return;}
-    if(e.message==='NO_KEY'){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3);font-size:13px;">Nastav TMDB klíč v ⚙️ Nastavení</div>';return;}
-    body.innerHTML=`<div style="text-align:center;padding:20px;color:var(--danger);font-size:13px;">${e.message}</div>`;
+  const now=Date.now();
+  const thirtyDays=30*24*3600*1000;
+  const allNotifs=_getSvtNotifs().filter(n=>now-n.ts<thirtyDays);
+  const unread=allNotifs.filter(n=>!n.read);
+  _updateNotifBadge(unread.length);
+  if(!unread.length){
+    const msg=allNotifs.length?'Vše přečteno ✓':'Žádné nové CZ epizody z oblíbených';
+    body.innerHTML=`<div style="text-align:center;padding:20px;color:var(--text-3);font-size:13px;">${msg}</div>`;
+    return;
   }
+  body.innerHTML=unread.sort((a,b)=>b.ts-a.ts).map(n=>{
+    const s=String(n.season).padStart(2,'0'),e=String(n.episode).padStart(2,'0');
+    const epCode=`S${s} E${e}`;
+    const timeAgo=_notifTimeAgo(now-n.ts);
+    const langBadge=n.isDub
+      ?'<span class="ep-lang-btn dab" style="font-size:9px;padding:2px 6px;pointer-events:none;">DAB+TIT</span>'
+      :'<span class="ep-lang-btn tit" style="font-size:9px;padding:2px 6px;pointer-events:none;">TIT</span>';
+    const cover=n.showPoster?TMDB_IMG+n.showPoster:'';
+    const desc=n.isDub?'Přidané titulky a dabing':'Přidané CZ titulky';
+    return `<div class="notif-dd-item" onclick="_markSvtNotifRead('${n.key}');document.getElementById('notifDropdown')?.remove();window.location.href='watch.html?id=${n.showId}&ep=${n.episode}&season=${n.season}'">
+      <img src="${cover}" class="notif-dd-thumb">
+      <div class="notif-dd-info">
+        <div class="notif-dd-title">${n.showName}</div>
+        <div class="notif-dd-sub">${epCode} &nbsp;·&nbsp; ${timeAgo} &nbsp;${langBadge}</div>
+        <div class="notif-dd-desc">${desc}</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 function closeNotifModal(){document.getElementById('notifDropdown')?.remove();}
 async function openSvtDirectly(slug){
@@ -1585,6 +1654,8 @@ function initHomePage(){
   }else{
     loadFilter('TRENDING');
     initHomeNotifications();
+    initNotifBadge();
+    checkSvtNotificationsBackground();
   }
 }
 
