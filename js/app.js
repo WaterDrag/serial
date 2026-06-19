@@ -1403,6 +1403,50 @@ function getAnimeWatchStatus(animeId){
   if(total>=maxEp&&maxEp>0)return'completed';
   return'watching';
 }
+function getWatchedEpCount(animeId){
+  const w=getWatched();let count=0;
+  for(const[k,eps]of Object.entries(w)){
+    if(!k.startsWith(`${animeId}_s`))continue;
+    count+=Object.values(eps).filter(Boolean).length;
+  }
+  return count;
+}
+async function getTmdbEpTotal(animeId){
+  const ck=`tmdb_ept_${animeId}`;
+  const c=JSON.parse(localStorage.getItem(ck)||'null');
+  if(c&&Date.now()-c.ts<86400000)return c.t;
+  try{
+    const d=await tmdbFetch(`/tv/${animeId}`);
+    const t=(d.seasons||[]).filter(s=>s.season_number>0).reduce((sum,s)=>sum+(s.episode_count||0),0)||d.number_of_episodes||0;
+    localStorage.setItem(ck,JSON.stringify({t,ts:Date.now()}));
+    return t||null;
+  }catch{return null;}
+}
+async function _enrichCardsWithEpCounts(items){
+  for(const a of items){
+    const watched=getWatchedEpCount(a.id);
+    if(!watched)continue;
+    const total=await getTmdbEpTotal(a.id);
+    const badgeEl=document.getElementById(`epbadge-${a.id}`);
+    if(!badgeEl)continue;
+    if(total){
+      const done=watched>=total;
+      if(done){
+        badgeEl.textContent='✓ Dokoukáno';
+        badgeEl.style.background='#000';
+        badgeEl.style.color='var(--success)';
+      }else{
+        badgeEl.textContent=`${watched} / ${total}`;
+        badgeEl.style.background='#000';
+        badgeEl.style.color='#fff';
+      }
+    }else{
+      badgeEl.textContent=`${watched} dílů`;
+      badgeEl.style.background='#000';
+      badgeEl.style.color='#fff';
+    }
+  }
+}
 
 function renderHistoryContent(){
   const sort=document.getElementById('historySortSelect')?.value||'recent';
@@ -1426,8 +1470,8 @@ function renderHistoryContent(){
     return;
   }
   container.innerHTML=`<div class="anime-grid">${items.map(a=>{
-    const st=getAnimeWatchStatus(a.id);
-    const badge=st==='completed'?'<div class="card-ep-badge" style="background:rgba(74,222,128,.22);color:var(--success);">✓ Dokoukáno</div>':st==='watching'?'<div class="card-ep-badge" style="background:rgba(139,110,245,.18);color:var(--accent-h);">▶ Rozkoukáno</div>':'';
+    const watched=getWatchedEpCount(a.id);
+    const badge=watched?`<div id="epbadge-${a.id}" class="card-ep-badge" style="background:#000;color:#fff;">${watched} / ?</div>`:'';
     return `<div class="anime-card" onclick="goToAnime(${a.id})">
       <div class="card-poster">
         <img src="${a.cover||''}" loading="lazy">
@@ -1439,6 +1483,7 @@ function renderHistoryContent(){
       <div class="card-meta">${a.year||''}${a.year&&a.genres?.[0]?' · ':''}${a.genres?.[0]||''}</div>
     </div>`;
   }).join('')}</div>`;
+  _enrichCardsWithEpCounts(items);
 }
 
 function initHistoryPage(){
@@ -2193,6 +2238,39 @@ function updateMarkSeasonBtn(){
   btn.className=allWatched?'btn-primary':'btn-outline';
   btn.style.fontSize='12px';btn.style.padding='8px 18px';
 }
+function toggleManualWatchForm(){
+  const form=document.getElementById('manualWatchForm');
+  const toggleBtn=document.getElementById('manualWatchToggleBtn');
+  if(!form)return;
+  const visible=form.style.display==='flex';
+  form.style.display=visible?'none':'flex';
+  if(toggleBtn){
+    toggleBtn.style.borderColor=visible?'var(--border)':'var(--accent)';
+    toggleBtn.style.color=visible?'var(--text-3)':'var(--accent)';
+  }
+  if(!visible){
+    const inp=document.getElementById('manualEp');
+    if(inp){inp.value='';inp.focus();}
+    const s=document.getElementById('manualSeason');
+    if(s)s.value=state.currentSeason||1;
+  }
+}
+function submitManualWatch(){
+  if(!state.currentAnime)return;
+  const s=parseInt(document.getElementById('manualSeason')?.value)||1;
+  const e=parseInt(document.getElementById('manualEp')?.value);
+  if(!e||e<1)return;
+  const was=isEpWatched(state.currentAnime.id,e,s);
+  markEpWatched(state.currentAnime.id,e,s,!was);
+  showToast(was?`Díl S${s}E${e} odznačen`:`✓ Díl S${s}E${e} označen jako zhlédnutý`,!was);
+  toggleManualWatchForm();
+  // přidej ghost epizodu do listu pokud tam není
+  if(!was&&!state.episodes.find(ep=>ep.number===e&&(ep.season||state.currentSeason)===s)){
+    const ghost={number:e,title:`Díl ${e}`,season:s,hasCz:false,sources:[]};
+    state.episodes=[...state.episodes,ghost].sort((a,b)=>a.number-b.number);
+  }
+  renderEpList();updateMarkSeasonBtn();
+}
 
 function toggleFav(){
   if(!state.currentAnime)return;
@@ -2693,6 +2771,7 @@ Object.assign(window, {
   toggleProfileDropdown,
   showHistoryTab,
   markSeasonWatched, markSeriesWatched,
+  toggleManualWatchForm, submitManualWatch,
   playEpWithMode,
   toggleEpWatched,
   carouselNav, carouselGo,

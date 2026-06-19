@@ -72,7 +72,18 @@
     <ul class="ep-list-wide" id="epList">
       <li style="color:var(--text-3);font-size:14px;padding:20px;text-align:center;">Načítám seznam...</li>
     </ul>
-    <div style="padding:16px 0 0;display:flex;justify-content:flex-end;">
+    <div style="padding:16px 0 0;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+      <div id="manualWatchWrap" style="display:flex;align-items:center;gap:8px;">
+        <button onclick="toggleManualWatchForm()" id="manualWatchToggleBtn" style="background:none;border:1px solid var(--border);color:var(--text-3);border-radius:20px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="if(!document.getElementById('manualWatchForm').offsetParent){this.style.borderColor='var(--border)';this.style.color='var(--text-3)'}">+ Označit díl ručně</button>
+        <div id="manualWatchForm" style="display:none;align-items:center;gap:6px;">
+          <span style="color:var(--text-3);font-size:11px;font-weight:700;">S</span>
+          <input id="manualSeason" type="number" min="1" value="1" style="width:44px;background:var(--surface);border:1px solid var(--border);color:var(--text-1);border-radius:8px;padding:5px 8px;font-size:12px;font-weight:700;text-align:center;font-family:inherit;">
+          <span style="color:var(--text-3);font-size:11px;font-weight:700;">E</span>
+          <input id="manualEp" type="number" min="1" placeholder="9" style="width:52px;background:var(--surface);border:1px solid var(--border);color:var(--text-1);border-radius:8px;padding:5px 8px;font-size:12px;font-weight:700;text-align:center;font-family:inherit;" onkeydown="if(event.key==='Enter')submitManualWatch()">
+          <button onclick="submitManualWatch()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer;">✓</button>
+          <button onclick="toggleManualWatchForm()" style="background:none;border:none;color:var(--text-3);font-size:16px;cursor:pointer;padding:0 4px;line-height:1;">✕</button>
+        </div>
+      </div>
       <button class="btn-outline" id="markSeasonBtn" onclick="markSeasonWatched()" style="display:none;font-size:12px;padding:8px 18px;gap:8px;">
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
         <span id="markSeasonBtnText">Označit sérii jako zhlédnutou</span>
