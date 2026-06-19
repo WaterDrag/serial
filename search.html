@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌊</text></svg>">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hledat — WaterStream</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="search">
+
+<header class="header">
+  <div class="header-inner">
+    <a href="index.html" class="logo">
+      <div class="logo-dot"></div>
+      🌊 WaterStream
+    </a>
+    <a href="search.html" class="logo-search-btn" title="Hledat anime">🔍</a>
+    <div class="search-wrap">
+      <svg class="search-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" id="searchInput" placeholder="Hledat anime..." autocomplete="off">
+      <div class="search-results" id="searchResults"></div>
+    </div>
+    <div class="header-right">
+      <button class="btn-icon" onclick="openNotifModal()">🔔</button>
+    </div>
+  </div>
+</header>
+
+<main class="main">
+  <!-- Filter bar -->
+  <div class="search-filter-bar">
+    <div class="search-filter-row">
+      <div class="search-filter-group">
+        <span class="search-filter-label">Seřadit</span>
+        <div class="filter-chips" id="browseSortChips">
+          <button class="filter-chip active" data-sort="TRENDING_DESC">Trending</button>
+          <button class="filter-chip" data-sort="POPULARITY_DESC">Populární</button>
+          <button class="filter-chip" data-sort="SCORE_DESC">Dle hodnocení</button>
+          <button class="filter-chip" data-sort="START_DATE_DESC">Nejnovější</button>
+        </div>
+      </div>
+    </div>
+    <div class="search-filter-row search-filter-selects-row">
+      <div class="select-wrap">
+        <select id="filterGenre" class="select-styled">
+          <option value="">Všechny žánry</option>
+          <option value="10759">Akce / Dobrodružství</option>
+          <option value="16">Animace</option>
+          <option value="35">Komedie</option>
+          <option value="80">Krimi</option>
+          <option value="99">Dokument</option>
+          <option value="18">Drama</option>
+          <option value="10751">Rodina</option>
+          <option value="10762">Děti</option>
+          <option value="9648">Mysteriózní</option>
+          <option value="10763">Zprávy</option>
+          <option value="10764">Reality</option>
+          <option value="10749">Romance</option>
+          <option value="10765">Sci-Fi / Fantasy</option>
+          <option value="10766">Soap</option>
+          <option value="10767">Talk show</option>
+          <option value="10768">Válka / Politika</option>
+          <option value="37">Western</option>
+          <option value="27">Horor</option>
+          <option value="53">Thriller</option>
+        </select>
+      </div>
+      <div class="select-wrap">
+        <select id="filterYear" class="select-styled">
+          <option value="">Všechny roky</option>
+          <option>2026</option><option>2025</option><option>2024</option>
+          <option>2023</option><option>2022</option><option>2021</option>
+          <option>2020</option><option>2019</option><option>2018</option>
+          <option>2017</option><option>2016</option><option>2015</option>
+          <option>2014</option><option>2013</option><option>2012</option>
+          <option>2011</option><option>2010</option><option>2009</option>
+          <option>2008</option><option>2007</option><option>2006</option>
+          <option>2005</option><option>2004</option><option>2003</option>
+          <option>2002</option><option>2001</option><option>2000</option>
+          <option>1999</option><option>1998</option><option>1997</option>
+          <option>1996</option><option>1995</option><option>1994</option>
+          <option>1993</option><option>1992</option><option>1991</option>
+          <option>1990</option>
+        </select>
+      </div>
+      <div class="select-wrap">
+        <select id="filterStatus" class="select-styled">
+          <option value="">Všechny stavy</option>
+          <option value="returning series">Pokračuje</option>
+          <option value="ended">Ukončeno</option>
+          <option value="canceled">Zrušeno</option>
+          <option value="in production">Ve výrobě</option>
+        </select>
+      </div>
+      <div class="select-wrap">
+        <select id="filterType" class="select-styled">
+          <option value="">Vše</option>
+          <option value="scripted">TV Seriál</option>
+          <option value="animation">Animace</option>
+          <option value="miniseries">Minisérie</option>
+          <option value="documentary">Dokument</option>
+          <option value="reality">Reality</option>
+        </select>
+      </div>
+      <div class="select-wrap">
+        <select id="filterScore" class="select-styled">
+          <option value="">Hodnocení: vše</option>
+          <option value="6">6+ / 10</option>
+          <option value="7">7+ / 10</option>
+          <option value="8">8+ / 10</option>
+          <option value="9">9+ / 10</option>
+        </select>
+      </div>
+      <button class="filter-chip" id="filterAnimeOnly" data-active="false">Jen anime</button>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="searchPageResults">
+    <div class="section-label" style="margin-bottom:16px;">
+      <div class="dot"></div>
+      <h2 id="searchPageResultsTitle">Procházet</h2>
+    </div>
+    <div class="anime-grid" id="searchPageGrid"></div>
+    <div class="load-more-wrap">
+      <button class="load-more-btn" id="searchLoadMore" onclick="browseLoadMore()" style="display:none">Načíst další</button>
+    </div>
+  </div>
+</main>
+
+<!-- NASTAVENÍ -->
+<div class="modal-overlay" id="configModal" onclick="if(event.target===this)closeConfig()">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">⚙️ Nastavení</div>
+      <button class="modal-close" onclick="closeConfig()">✕</button>
+    </div>
+    <div class="config-section">
+      <div class="config-section-title">🇨🇿 CZ/SK Zdroj (svetserialu.io)</div>
+      <div class="config-field">
+        <label class="config-label">Cloudflare Worker URL <span id="proxyStatus" class="config-status"></span></label>
+        <input class="config-input" type="text" id="cfgProxy" placeholder="https://anisteam.zitkatomik007.workers.dev">
+        <div class="config-hint">Proxy Worker pro přístup k svetserialu.io. Musí mít nastavenou SESSION cookie.</div>
+      </div>
+      <div class="config-field">
+        <label class="config-label">Preferovaný zdroj</label>
+        <select id="cfgSource" class="config-input">
+          <option value="auto">Automaticky (VOE jako výchozí)</option>
+          <option value="voe">Voe</option>
+          <option value="doodstream">Doodstream</option>
+          <option value="streamtape">Streamtape</option>
+          <option value="vidmoly">Vidmoly</option>
+          <option value="mixdrop">Mixdrop</option>
+          <option value="filemoon">Filemoon</option>
+        </select>
+      </div>
+    </div>
+    <div class="config-section" id="tmdbKeySection">
+      <div class="config-section-title">🎬 TMDB API klíč</div>
+      <div class="config-field">
+        <label class="config-label">API klíč <span id="tmdbKeyStatus" class="config-status"></span></label>
+        <input class="config-input" type="password" id="cfgTmdbKey" placeholder="Vlož svůj TMDB API klíč...">
+        <div class="config-hint">Zdarma na <a href="https://www.themoviedb.org/settings/api" target="_blank" style="color:var(--accent-h)">themoviedb.org/settings/api</a> — potřebný pro zobrazení anime.</div>
+      </div>
+    </div>
+    <div class="config-section">
+      <div class="config-section-title">🤖 Gemini API klíč (AI titulky)</div>
+      <div class="config-field">
+        <label class="config-label">API klíč <span id="geminiKeyStatus" class="config-status"></span></label>
+        <input class="config-input" type="password" id="cfgGeminiKey" placeholder="Vlož svůj Gemini API klíč...">
+        <div class="config-hint">Zdarma na <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent-h)">aistudio.google.com</a> — záloha pro AI překlad titulků SK→CZ.</div>
+      </div>
+    </div>
+    <div class="config-section">
+      <div class="config-section-title">🔤 DeepL API klíč (překlad titulků)</div>
+      <div class="config-field">
+        <label class="config-label">API klíč <span id="deeplKeyStatus" class="config-status"></span></label>
+        <input class="config-input" type="password" id="cfgDeeplKey" placeholder="Vlož svůj DeepL API klíč...">
+        <div class="config-hint">Zdarma na <a href="https://www.deepl.com/pro-api" target="_blank" style="color:var(--accent-h)">deepl.com/pro-api</a> — 500 000 znaků/měsíc, lepší překlad SK→CZ (primární, Gemini jako záloha).</div>
+      </div>
+    </div>
+    <button class="btn-save" onclick="saveConfig()">💾 Uložit nastavení</button>
+  </div>
+</div>
+
+<!-- NOTIFIKACE -->
+<div class="modal-overlay" id="notifModal" onclick="if(event.target===this)closeNotifModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">🔔 Nové epizody</div>
+      <button class="modal-close" onclick="closeNotifModal()">✕</button>
+    </div>
+    <div id="notifContent" style="max-height:60vh;overflow-y:auto;padding-right:10px;">
+      <div style="text-align:center;padding:20px;color:var(--text-3)">Načítám...</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast">
+  <div class="toast-dot" id="toastDot"></div>
+  <span id="toastMsg"></span>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
