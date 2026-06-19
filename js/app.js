@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js';
-import { getAuth, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js';
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
 
 /* ══════════════════════════════════════════════════════════
@@ -22,19 +22,6 @@ async function _initFirebaseInner() {
   const app = initializeApp(FB_CONFIG);
   fbDb = getFirestore(app);
   fbAuth = getAuth(app);
-
-  // Pick up result if user just came back from Google redirect
-  try {
-    const result = await getRedirectResult(fbAuth);
-    if (result?.user) {
-      fbUid = result.user.uid;
-      renderAuthUI(result.user);
-      await syncFromFirestore();
-      return;
-    }
-  } catch(e) {
-    console.warn('[Firebase] redirect result error:', e);
-  }
 
   await new Promise(resolve => {
     const unsub = onAuthStateChanged(fbAuth, async user => {
@@ -139,14 +126,21 @@ function toggleProfileDropdown() {
 
 async function signInWithGoogle() {
   const btn = document.getElementById('googleSignInBtn');
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = 'Přesměrovávám…'; }
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = 'Přihlašuji…'; }
   try {
     const provider = new GoogleAuthProvider();
-    await signInWithRedirect(fbAuth, provider);
-    // page navigates to Google — result handled in _initFirebaseInner on return
+    const result = await signInWithPopup(fbAuth, provider);
+    fbUid = result.user.uid;
+    renderAuthUI(result.user);
+    await syncFromFirestore();
+    document.getElementById('loginOverlay')?.remove();
   } catch(e) {
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'Přihlásit se přes Google'; }
-    showToast('Přihlášení selhalo: ' + e.message, false);
+    if (e.code === 'auth/unauthorized-domain') {
+      showToast('Přidej tuto doménu do Firebase → Authentication → Authorized domains', false);
+    } else if (e.code !== 'auth/popup-closed-by-user') {
+      showToast('Přihlášení selhalo: ' + (e.code || e.message), false);
+    }
   }
 }
 
