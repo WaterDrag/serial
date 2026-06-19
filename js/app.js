@@ -656,6 +656,30 @@ function extractSvtSources(html){
   }
   return sources;
 }
+/* ══════════════════════════════════════════════════════════
+   SLEDUJSERIALY.IO FALLBACK
+══════════════════════════════════════════════════════════ */
+async function findSledujSerialySlug(anime){
+  const queries=[anime.title?.english,anime.title?.romaji].filter(Boolean);
+  for(const q of queries){
+    try{
+      const res=await fetch(getProxy()+'/sledujserialy/theme/json/searchform1.php',{
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:`term=${encodeURIComponent(q)}&selected_language_id=1&v=656`,
+        signal:AbortSignal.timeout(8000),
+      });
+      if(!res.ok)continue;
+      const data=await res.json();
+      if(Array.isArray(data)&&data[0]?.tvshow_id!=='0'&&data[0]?.slug)return data[0].slug;
+    }catch{}
+  }
+  return null;
+}
+function buildSsEpUrl(slug,season,ep){
+  return`https://sledujserialy.io/cz/episode/${slug}-s${String(season).padStart(2,'0')}e${String(ep).padStart(2,'0')}`;
+}
+
 function resolveIframeUrl(b64){
   let decoded;try{decoded=atob(b64);}catch(e){throw new Error('Neplatný base64');}
   decoded=decoded.trim();
@@ -1804,12 +1828,25 @@ function showSvtManualBanner(){
   const banner=document.createElement('div');
   banner.className='svt-manual-banner';
   banner.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-radius:var(--r-md);background:rgba(139,110,245,.08);border:1px solid rgba(139,110,245,.25);margin-bottom:16px;font-size:13px;';
+  const t=state.currentAnime?encodeURIComponent(getTitle(state.currentAnime)):'';
   banner.innerHTML=`<span style="color:var(--accent-h);font-weight:700;flex-shrink:0;">🇨🇿 CZ slug ručně:</span>
     <input id="svtSlugInput" type="text" placeholder="např. re-zero (z URL /serial/...)" style="flex:1;min-width:160px;background:var(--bg);border:1px solid var(--border);color:var(--text-1);border-radius:var(--r-sm);padding:8px 12px;font-size:13px;font-family:inherit;">
     <button onclick="useSvtSlugManual()" style="background:var(--accent);color:#fff;border:none;border-radius:var(--r-sm);padding:8px 16px;font-size:13px;font-weight:800;cursor:pointer;flex-shrink:0;">Načíst CZ</button>
-    <span style="color:var(--text-3);font-size:11px;width:100%;">Otevři svetserialu.io, najdi anime, zkopíruj slug z URL (svetserialu.io/serial/<b>tento-text</b>)</span>`;
+    <span style="color:var(--text-3);font-size:11px;width:100%;">Otevři svetserialu.io, najdi anime, zkopíruj slug z URL (svetserialu.io/serial/<b>tento-text</b>)</span>
+    ${t?`<div style="display:flex;gap:10px;flex-wrap:wrap;padding-top:6px;border-top:1px solid rgba(255,255,255,.06);width:100%;align-items:center;">
+      <span style="color:var(--text-3);font-size:11px;">Sleduj externě:</span>
+      <a href="https://allanime.day/search?keyword=${t}" target="_blank" style="color:var(--accent-h);font-size:12px;text-decoration:underline;">AllAnime ↗</a>
+      <a href="https://animepahe.ch/?s=${t}" target="_blank" style="color:var(--accent-h);font-size:12px;text-decoration:underline;">AnimePahe ↗</a>
+      <a id="ssShowLink" href="https://sledujserialy.io/cz/?term=${t}" target="_blank" style="color:var(--accent-h);font-size:12px;text-decoration:underline;">SledujSerialy ↗</a>
+    </div>`:''}`;
   const epSection=document.querySelector('.episodes-section');
   if(epSection)epSection.insertBefore(banner,epSection.firstChild);
+  if(state.currentAnime){
+    findSledujSerialySlug(state.currentAnime).then(slug=>{
+      const a=banner.querySelector('#ssShowLink');
+      if(a&&slug){a.href=`https://sledujserialy.io/cz/serial/${slug}`;a.textContent='SledujSerialy ✓ ↗';}
+    });
+  }
 }
 async function getGlobalSvtSlug(tmdbId){
   if(!fbDb)return null;
@@ -2047,12 +2084,14 @@ async function playEp(index){
   if(ep.slug==='__animegg__'){await playAnimeggEp(ep,wrap,ph);return;}
 
   if(ep.slug==='__unavailable__'){
+    const _t=encodeURIComponent(getTitle(state.currentAnime));
     ph.style.display='flex';
     ph.innerHTML=`<svg width="52" height="52" fill="none" stroke="var(--warn)" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><circle cx="12" cy="16.5" r=".5" fill="var(--warn)"/></svg>
     <span style="color:var(--warn);font-weight:700;">Epizoda nedostupná</span>
     <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">
-      <a href="https://allanime.day/search?keyword=${encodeURIComponent(getTitle(state.currentAnime))}" target="_blank" style="color:var(--accent-h);font-size:13px;">AllAnime ↗</a>
-      <a href="https://animepahe.ch/?s=${encodeURIComponent(getTitle(state.currentAnime))}" target="_blank" style="color:var(--accent-h);font-size:13px;">AnimePahe ↗</a>
+      <a href="https://allanime.day/search?keyword=${_t}" target="_blank" style="color:var(--accent-h);font-size:13px;">AllAnime ↗</a>
+      <a href="https://animepahe.ch/?s=${_t}" target="_blank" style="color:var(--accent-h);font-size:13px;">AnimePahe ↗</a>
+      <a id="ssEpLink" href="https://sledujserialy.io/cz/?term=${_t}" target="_blank" style="color:var(--accent-h);font-size:13px;">SledujSerialy ↗</a>
     </div>
     <div style="width:100%;max-width:480px;margin-top:8px;display:flex;flex-direction:column;gap:8px;align-items:stretch;">
       <div style="color:var(--text-3);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;">Zadat URL ručně</div>
@@ -2061,6 +2100,12 @@ async function playEp(index){
         <button onclick="playManualUrl()" style="background:var(--accent);color:#fff;border:none;border-radius:var(--r-sm);padding:10px 18px;font-size:13px;font-weight:800;cursor:pointer;">▶</button>
       </div>
     </div>`;
+    const _snapEp=ep;
+    findSledujSerialySlug(state.currentAnime).then(slug=>{
+      if(!slug)return;
+      const a=document.getElementById('ssEpLink');
+      if(a){a.href=buildSsEpUrl(slug,_snapEp.season||state.currentSeason||1,_snapEp.number);a.textContent='SledujSerialy ✓ ↗';}
+    });
     return;
   }
 

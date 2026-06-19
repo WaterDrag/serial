@@ -54,6 +54,9 @@ export default {
     // AnimeGG CORS proxy
     if (url.pathname.startsWith('/animegg')) return handleAnimeggProxy(request, url);
 
+    // SledujSerialy CORS proxy
+    if (url.pathname.startsWith('/sledujserialy')) return handleSledujSerialyProxy(request, url);
+
     // SVT (svetserialu.io) proxy
     return handleSvtProxy(request, env, url);
   },
@@ -153,6 +156,36 @@ async function handleAnimePaheProxy(request, reqUrl, env) {
   const body = await upstream.text();
   const ct = upstream.headers.get('Content-Type') || 'application/json';
   return new Response(body, {
+    status: upstream.status,
+    headers: corsHeaders({ 'Content-Type': ct, 'Cache-Control': 'no-store' }),
+  });
+}
+
+/* ── sledujserialy.io proxy ─────────────────────────────────────── */
+async function handleSledujSerialyProxy(request, reqUrl) {
+  const path = reqUrl.pathname.replace(/^\/sledujserialy/, '') || '/';
+  const target = 'https://sledujserialy.io' + path + reqUrl.search;
+  const headers = {
+    'User-Agent': PROXY_UA,
+    'Referer': 'https://sledujserialy.io/',
+    'Origin': 'https://sledujserialy.io',
+    'Accept': 'application/json, */*',
+    'Accept-Language': 'cs,sk;q=0.9,en-US;q=0.8',
+    'X-Requested-With': 'XMLHttpRequest',
+  };
+  let body = null;
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    headers['Content-Type'] = request.headers.get('Content-Type') || 'application/x-www-form-urlencoded; charset=UTF-8';
+    body = await request.text();
+  }
+  let upstream;
+  try {
+    upstream = await fetch(target, { method: request.method, headers, body, redirect: 'follow', signal: AbortSignal.timeout(15000) });
+  } catch (e) {
+    return new Response('SledujSerialy fetch error: ' + e.message, { status: 502, headers: corsHeaders() });
+  }
+  const ct = upstream.headers.get('Content-Type') || 'application/json';
+  return new Response(await upstream.text(), {
     status: upstream.status,
     headers: corsHeaders({ 'Content-Type': ct, 'Cache-Control': 'no-store' }),
   });
