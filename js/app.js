@@ -164,6 +164,7 @@ async function syncFromFirestore() {
       const cfg = getCfg();
       Object.assign(cfg, d.settings);
       setCfg(cfg);
+      _applySubSize();
     }
     if (d.favs)    localStorage.setItem('ani_favs',    JSON.stringify(d.favs));
     if (d.watched) {
@@ -781,7 +782,53 @@ function resolveIframeUrl(b64){
 /* ══════════════════════════════════════════════════════════
    AI SUBTITLE TRANSLATOR (SK → CZ)
 ══════════════════════════════════════════════════════════ */
-const _sub={cues:[],timer:null,startMs:0,offsetMs:0,active:false,rawText:'',fileName:'',paused:false,pausedAt:0,lang:'sk'};
+const _sub={cues:[],timer:null,startMs:0,offsetMs:0,active:false,rawText:'',fileName:'',paused:false,pausedAt:0,lang:'sk',_nativeTrackUrl:null};
+
+function _msToVttTime(ms){
+  const h=Math.floor(ms/3600000),m=Math.floor((ms%3600000)/60000),s=Math.floor((ms%60000)/1000),f=ms%1000;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(f).padStart(3,'0')}`;
+}
+
+let _pipAbort=null;
+
+function _applyNativeTrack(){
+  const video=document.querySelector('#playerWrap video');
+  if(!video||!_sub.cues.length)return;
+  _removeNativeTrack();
+  let vtt='WEBVTT\n\n';
+  _sub.cues.forEach((c,i)=>{
+    vtt+=`${i+1}\n${_msToVttTime(c.start)} --> ${_msToVttTime(c.end)}\n${c.cz||c.sk}\n\n`;
+  });
+  _sub._nativeTrackUrl=URL.createObjectURL(new Blob([vtt],{type:'text/vtt'}));
+  const track=document.createElement('track');
+  track.kind='subtitles';track.label='AI CZ';track.srclang='cs';
+  track.src=_sub._nativeTrackUrl;track.setAttribute('data-ai','1');
+  video.appendChild(track);
+  const getAiTrack=()=>{for(let i=0;i<video.textTracks.length;i++){if(video.textTracks[i].label==='AI CZ')return video.textTracks[i];}return null;};
+  // Nativní stopa se zapíná jen když je přímo VIDEO v FS (ne playerWrap) nebo v PiP
+  // V playerWrap FS zobrazuje titulky HTML overlay — nativní stopa by byla duplicitní
+  const isVideoFs=()=>{const v=document.querySelector('#playerWrap video');return !!(v&&(document.fullscreenElement===v||document.webkitFullscreenElement===v));};
+  track.addEventListener('load',()=>{const t=getAiTrack();if(t)t.mode=isVideoFs()?'showing':'hidden';},{once:true});
+  _pipAbort=new AbortController();
+  const sig=_pipAbort.signal;
+  document.addEventListener('fullscreenchange',()=>{const t=getAiTrack();if(t)t.mode=isVideoFs()?'showing':'hidden';},{signal:sig});
+  document.addEventListener('webkitfullscreenchange',()=>{const t=getAiTrack();if(t)t.mode=isVideoFs()?'showing':'hidden';},{signal:sig});
+  // PiP: activate native track
+  video.addEventListener('enterpictureinpicture',()=>{const t=getAiTrack();if(t)t.mode='showing';},{signal:sig});
+  video.addEventListener('leavepictureinpicture',()=>{const t=getAiTrack();if(t)t.mode=isFs()?'showing':'hidden';},{signal:sig});
+}
+
+function _removeNativeTrack(){
+  _pipAbort?.abort();_pipAbort=null;
+  const video=document.querySelector('#playerWrap video');
+  if(video){
+    video.querySelectorAll('track[data-ai]').forEach(t=>t.remove());
+    for(let i=0;i<video.textTracks.length;i++){
+      if(video.textTracks[i].label==='AI CZ'){video.textTracks[i].mode='hidden';}
+    }
+  }
+  if(_sub._nativeTrackUrl){URL.revokeObjectURL(_sub._nativeTrackUrl);_sub._nativeTrackUrl=null;}
+}
 
 function extractSubtitleUrl(html){
   // SVT-specific download link: /downloadSubs?urlSubs=slug-sN-eN-lang-ID.vtt
@@ -921,6 +968,24 @@ function _subSetBtnState(on){
   }
 }
 
+function subSeek(deltaMs){
+  if(!_sub.active)return;
+  seekSubTo(Math.max(0,_subElapsed()+deltaMs));
+}
+function subTogglePause(){
+  if(!_sub.active)return;
+  const btn=document.getElementById('subPauseBarBtn');
+  if(_sub.paused){resumeSubTimer();if(btn)btn.textContent='⏸';}
+  else{pauseSubTimer();if(btn)btn.textContent='▶';}
+}
+
+function _subElapsed(){
+  const video=document.querySelector('#playerWrap video');
+  if(video)return video.currentTime*1000;
+  if(_sub.paused)return _sub.pausedAt-_sub.startMs;
+  return performance.now()-_sub.startMs;
+}
+
 function _msToTimeStr(ms){
   const s=Math.floor(ms/1000),m=Math.floor(s/60),h=Math.floor(m/60);
   return h>0?`${h}:${String(m%60).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`
@@ -944,6 +1009,7 @@ function _subTick(){
   if(el)el.textContent=cue?cue.cz:'';
   const ti=document.getElementById('subTimeInput');
   if(ti&&document.activeElement!==ti)ti.value=_msToTimeStr(elapsed);
+  const td=document.getElementById('subTimeDisp');if(td)td.textContent=_msToTimeStr(elapsed);
   requestAnimationFrame(_subTick);
 }
 
@@ -984,6 +1050,7 @@ function stopSubTimer(){
   _sub.offsetMs=0;
   _sub.rawText='';
   _sub.fileName='';
+  _removeNativeTrack();
   _sub.lang='sk';
   const overlay=document.getElementById('aiSubOverlay');
   if(overlay)overlay.style.display='none';
@@ -1048,6 +1115,7 @@ async function toggleAiSubs(){
   await translateCuesCz(_sub.cues);
   if(!_sub.cues.some(c=>c.cz!==c.sk)){showToast('Překlad selhal — zkontroluj DeepL nebo Gemini API klíč',false);return;}
   startSubTimer();
+  _applyNativeTrack();
   showToast('AI titulky zapnuty ✓',true);
 }
 
@@ -1138,7 +1206,19 @@ function updateManualSub(val){
   if(val.trim()){overlay.style.display='block';el.textContent=val;}
   else{el.textContent='';overlay.style.display='none';}
 }
-Object.assign(window,{toggleAiSubs,toggleSubPause,seekSubToInput,downloadSubs,toggleManualSub,updateManualSub,_markNotifRead,_markSvtNotifRead});
+function _applySubSize(){
+  const sz=getCfg().sub_size||16;
+  document.documentElement.style.setProperty('--sub-size',sz+'px');
+  const inp=document.getElementById('subSizeInput');
+  if(inp)inp.value=sz;
+}
+function setSubSize(val){
+  const sz=Math.max(10,Math.min(40,parseInt(val)||16));
+  const cfg=getCfg();cfg.sub_size=sz;setCfg(cfg);
+  saveSettingsToFirestore();
+  _applySubSize();
+}
+Object.assign(window,{toggleAiSubs,toggleSubPause,seekSubToInput,downloadSubs,setSubSize,subSeek,subTogglePause,_markNotifRead,_markSvtNotifRead});
 /* ══ SVT notifikace (localStorage) ══════════════════════════════════════ */
 const _SVT_NOTIFS_KEY='svt_notifs_v2';
 const _SVT_EP_SEEN='svt_ep_';
@@ -2509,6 +2589,9 @@ function loadSvtSource(index){
       if(next<state.svtSources.length){showToast(`${capitalize(src.provider)} pomalý, zkouším ${capitalize(state.svtSources[next].provider)}…`);loadSvtSource(next);}
     },15000);
     iframe.onload=()=>clearTimeout(timer);
+    // Overlay musí být poslední child aby byl nad iframem
+    const ov=document.getElementById('aiSubOverlay');
+    if(ov)wrap.appendChild(ov);
   }catch(e){
     const next=index+1;
     if(next<state.svtSources.length)setTimeout(()=>loadSvtSource(next),400);
@@ -2597,8 +2680,88 @@ function updateWatchedBtn(){
   if(btn)btn.innerHTML=`<svg width="24" height="24" fill="none" stroke="${w?'var(--success)':'var(--text-3)'}" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`;
 }
 
+let _redirectFs=false;
+let _fsMoveListener=null,_subCtrlHideTO=null;
+function _showSubCtrlBar(){
+  const bar=document.getElementById('subCtrlBar');
+  if(!bar)return;
+  bar.style.opacity='1';bar.style.pointerEvents='auto';
+  clearTimeout(_subCtrlHideTO);
+  _subCtrlHideTO=setTimeout(()=>{bar.style.opacity='0';bar.style.pointerEvents='none';},2500);
+}
+
+function togglePlayerFullscreen(){
+  const wrap=document.getElementById('playerWrap');
+  if(!wrap)return;
+  const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
+  if(isFs){document.exitFullscreen?.().catch(()=>{});document.webkitExitFullscreen?.();}
+  else{wrap.requestFullscreen?.().catch(()=>{});}
+}
+
+function initPlayerFullscreen(){
+  const wrap=document.getElementById('playerWrap');
+  if(!wrap)return;
+
+  // Keep bar visible while mouse is over it
+  const bar=document.getElementById('subCtrlBar');
+  if(bar){
+    bar.addEventListener('mouseenter',()=>clearTimeout(_subCtrlHideTO));
+    bar.addEventListener('mouseleave',()=>{_subCtrlHideTO=setTimeout(()=>{bar.style.opacity='0';bar.style.pointerEvents='none';},1500);});
+  }
+
+  // Hotspot in top-right corner captures mouseenter even over cross-origin iframes
+  const hotspot=document.getElementById('subCtrlHotspot');
+  if(hotspot)hotspot.addEventListener('mouseenter',_showSubCtrlBar);
+
+  const _enterFs=()=>{
+    const iframe=wrap.querySelector('iframe');
+    if(iframe){iframe.tabIndex=-1;iframe.focus();}
+    else{wrap.tabIndex=-1;wrap.focus();}
+  };
+  const _exitFs=()=>{
+    clearTimeout(_subCtrlHideTO);
+    if(bar){bar.style.opacity='0';bar.style.pointerEvents='none';}
+  };
+
+  const updateBtn=()=>{
+    const btn=document.getElementById('fsBtn');
+    if(!btn)return;
+    const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
+    btn.innerHTML=isFs
+      ?'<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>'
+      :'<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
+    btn.title=isFs?'Ukončit fullscreen':'Fullscreen (titulky zůstanou viditelné)';
+  };
+
+  document.addEventListener('fullscreenchange',()=>{
+    const video=wrap.querySelector('video');
+    if(_redirectFs){_redirectFs=false;wrap.requestFullscreen().catch(()=>{});return;}
+    if(document.fullscreenElement===video){_redirectFs=true;document.exitFullscreen().catch(()=>{});}
+    if(document.fullscreenElement===wrap)_enterFs();
+    else _exitFs();
+    updateBtn();
+  });
+  document.addEventListener('webkitfullscreenchange',()=>{
+    if(document.webkitFullscreenElement===wrap)_enterFs();
+    else _exitFs();
+    updateBtn();
+  });
+}
+
 async function initWatchPage(){
   initSearch();
+  initPlayerFullscreen();
+  _applySubSize();
+  document.addEventListener('keydown',e=>{
+    if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.isContentEditable)return;
+    if(!_sub.active)return;
+    if(e.key==='Enter'||e.key==='ArrowRight'||e.key==='ArrowLeft'){
+      e.preventDefault();
+      if(e.target.tagName==='BUTTON'||e.target.tagName==='SELECT')e.target.blur();
+      if(e.key==='Enter'){_sub.paused?resumeSubTimer():pauseSubTimer();}
+      else{seekSubTo(Math.max(0,_subElapsed()+(e.key==='ArrowRight'?5000:-5000)));}
+    }
+  });
   const params=new URLSearchParams(location.search);
   const animeId=parseInt(params.get('id'));
   const epNum=parseInt(params.get('ep')||'1');
@@ -2772,6 +2935,7 @@ Object.assign(window, {
   showHistoryTab,
   markSeasonWatched, markSeriesWatched,
   toggleManualWatchForm, submitManualWatch,
+  togglePlayerFullscreen,
   playEpWithMode,
   toggleEpWatched,
   carouselNav, carouselGo,

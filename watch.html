@@ -52,8 +52,17 @@
           <span>Načítám...</span>
         </div>
         <!-- AI subtitle overlay -->
-        <div id="aiSubOverlay" style="display:none;position:absolute;bottom:60px;left:0;right:0;z-index:20;text-align:center;pointer-events:none;">
-          <span id="aiSubText" style="display:inline-block;background:rgba(0,0,0,.75);color:#fff;font-size:16px;font-weight:600;padding:4px 12px;border-radius:6px;max-width:90%;line-height:1.4;text-shadow:0 1px 3px #000;"></span>
+        <div id="aiSubOverlay" style="display:none;position:absolute;bottom:60px;left:0;right:0;z-index:9999;text-align:center;pointer-events:none;">
+          <span id="aiSubText" style="display:inline-block;background:rgba(0,0,0,.75);color:#fff;font-size:var(--sub-size,16px);font-weight:600;padding:4px 12px;border-radius:6px;max-width:90%;line-height:1.4;text-shadow:0 1px 3px #000;"></span>
+        </div>
+        <!-- Invisible top-right hotspot — triggers subCtrlBar on mouseenter even over cross-origin iframe -->
+        <div id="subCtrlHotspot" style="position:absolute;top:0;right:0;width:260px;height:130px;z-index:9997;display:none;pointer-events:auto;"></div>
+        <!-- Subtitle control bar — visible only in fullscreen (CSS), for iframe sources where keyboard shortcuts can't reach -->
+        <div id="subCtrlBar" style="position:absolute;top:12px;right:12px;z-index:9998;display:none;gap:.4em;align-items:center;opacity:0;pointer-events:none;transition:opacity .25s;font-size:var(--sub-size,16px);">
+          <span id="subTimeDisp" style="color:#fff;font-size:inherit;font-weight:700;background:rgba(0,0,0,.65);padding:.3em .6em;border-radius:.4em;min-width:3em;text-align:center;">0:00</span>
+          <button onclick="subSeek(-5000)" style="background:rgba(0,0,0,.65);border:none;color:#fff;border-radius:.4em;padding:.3em .6em;font-size:inherit;font-weight:700;cursor:pointer;">←5s</button>
+          <button id="subPauseBarBtn" onclick="subTogglePause()" style="background:rgba(0,0,0,.65);border:none;color:#fff;border-radius:.4em;padding:.3em .6em;font-size:inherit;font-weight:700;cursor:pointer;">⏸</button>
+          <button onclick="subSeek(5000)" style="background:rgba(0,0,0,.65);border:none;color:#fff;border-radius:.4em;padding:.3em .6em;font-size:inherit;font-weight:700;cursor:pointer;">5s→</button>
         </div>
       </div>
 
@@ -66,8 +75,8 @@
           <input id="subTimeInput" type="text" inputmode="decimal" placeholder="0:00" onkeydown="if(event.key==='Enter')seekSubToInput()" style="display:none;width:52px;background:var(--surface);border:1px solid var(--border);color:var(--text-1);border-radius:20px;padding:4px 8px;font-size:11px;font-weight:700;text-align:center;outline:none;font-family:inherit;" title="Aktuální pozice titulků — zadej čas videa a stiskni Enter pro synchronizaci">
           <button id="aiSubSyncBtn" onclick="toggleSubPause()" style="display:none;background:var(--surface);border:1px solid var(--border);color:var(--text-1);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;" title="Pozastavit / Pokračovat titulky">⏸ Pauza</button>
           <button id="subDownloadBtn" onclick="downloadSubs()" style="display:none;background:var(--surface);border:1px solid var(--border);color:var(--text-1);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;gap:4px;align-items:center;" title="Stáhnout titulky (po překladu stáhne CZ verzi)">⬇ TIT</button>
-          <button id="manualSubToggle" onclick="toggleManualSub()" style="background:var(--surface);border:1px solid var(--border);color:var(--text-1);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;" title="Ručně zadat text titulku">✏️</button>
-          <input id="manualSubInput" type="text" placeholder="Zadat text..." oninput="updateManualSub(this.value)" onkeydown="if(event.key==='Escape'){this.value='';updateManualSub('');toggleManualSub();}" style="display:none;width:200px;background:var(--surface);border:1px solid var(--accent);color:var(--text-1);border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600;outline:none;font-family:inherit;" />
+          <input id="subSizeInput" type="number" min="10" max="40" value="16" onchange="setSubSize(this.value)" onkeydown="if(event.key==='Enter')this.blur()" style="width:46px;background:var(--surface);border:1px solid var(--border);color:var(--text-1);border-radius:20px;padding:4px 8px;font-size:11px;font-weight:700;text-align:center;outline:none;font-family:inherit;" title="Velikost titulků (px)">
+          <button onclick="togglePlayerFullscreen()" style="background:var(--surface);border:1px solid var(--border);color:var(--text-1);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:4px;" title="Fullscreen — titulky zůstanou viditelné"><svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg> FS</button>
         </div>
       </div>
 
