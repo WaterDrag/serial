@@ -1277,15 +1277,19 @@ async function checkSvtNotificationsBackground(){
       const seenEps=new Set();const eps=[];
       const re=/href="(\/serial\/[^"]*?\/s(\d+)e(\d+))"/gi;
       let m;
+      const _rawMatches=[];
       while((m=re.exec(html))!==null){
         const s=parseInt(m[2]),e=parseInt(m[3]),k=`${s}_${e}`;
-        if(!seenEps.has(k)){
-          seenEps.add(k);
-          // SVT zobrazuje "episode-cc" třídu přímo v listingu → není potřeba fetch epizody
-          const ctx=html.slice(m.index,m.index+1000);
-          eps.push({path:m[1],s,e,hasSubs:/episode-cc/.test(ctx)});
-        }
+        if(!seenEps.has(k)){seenEps.add(k);_rawMatches.push({index:m.index,path:m[1],s,e});}
       }
+      _rawMatches.forEach((ep,i)=>{
+        // Segment od aktuálního href po začátek dalšího (nebo +1500 znaků)
+        const segEnd=_rawMatches[i+1]?.index??Math.min(ep.index+1500,html.length);
+        // Lookback 400 znaků pro class="episode-cc" před href atributem
+        const seg=html.slice(Math.max(0,ep.index-400),segEnd).toLowerCase();
+        const hasSubs=/episode-cc/.test(seg)||/\btit\b|titulky/.test(seg);
+        eps.push({path:ep.path,s:ep.s,e:ep.e,hasSubs});
+      });
       if(!eps.length)continue;
       eps.sort((a,b)=>b.s!==a.s?b.s-a.s:b.e-a.e);
       // 2) Je to první scan pro tento seriál?
