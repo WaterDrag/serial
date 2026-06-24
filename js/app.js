@@ -176,6 +176,7 @@ async function syncFromFirestore() {
       }
     }
     if (d.history) localStorage.setItem('ani_history', JSON.stringify(d.history));
+    if (d.svtState) _saveSvtState(d.svtState);
   } catch(e) {
     console.warn('[Firebase] sync error:', e);
   }
@@ -1203,15 +1204,22 @@ function setSubSize(val){
   _applySubSize();
 }
 Object.assign(window,{toggleAiSubs,toggleSubPause,seekSubToInput,downloadSubs,setSubSize,subSeek,subTogglePause,_markSvtNotifRead});
-/* ══ SVT notifikace (localStorage) ══════════════════════════════════════ */
+/* ══ SVT notifikace (localStorage + Firestore) ══════════════════════════ */
 const _SVT_NOTIFS_KEY='svt_notifs_v2';
-const _SVT_EP_SEEN='svt_ep_';
+const _SVT_STATE_KEY='svt_state_v1';
 const _SVT_CHECK_TS='svt_notif_ts';
 const _SVT_CHECK_INTERVAL=2*3600*1000;
 function _getSvtNotifs(){try{return JSON.parse(localStorage.getItem(_SVT_NOTIFS_KEY)||'[]');}catch{return[];}}
 function _saveSvtNotifs(arr){localStorage.setItem(_SVT_NOTIFS_KEY,JSON.stringify(arr));}
 function _markSvtNotifRead(key){_saveSvtNotifs(_getSvtNotifs().map(n=>n.key===key?{...n,read:true}:n));}
 function initNotifBadge(){_updateNotifBadge(_getSvtNotifs().filter(n=>!n.read).length);}
+function _getSvtState(){try{return JSON.parse(localStorage.getItem(_SVT_STATE_KEY)||'{}');}catch{return{};}}
+function _saveSvtState(obj){localStorage.setItem(_SVT_STATE_KEY,JSON.stringify(obj));}
+function _saveSvtStateToFirestore(state){
+  if(!fbDb||!fbUid)return;
+  setDoc(doc(fbDb,'users',fbUid),{svtState:state},{merge:true})
+    .catch(e=>console.warn('[Firebase] save svtState:',e));
+}
 async function _createSvtNotif(fav,meta,ep){
   const s2=String(ep.s).padStart(2,'0'),e2=String(ep.e).padStart(2,'0');
   const key=`${fav.id}_s${s2}e${e2}_tit`;
@@ -1228,6 +1236,8 @@ async function checkSvtNotificationsBackground(){
   const favs=getFavs();
   if(!favs.length)return;
   const slugMeta=await Promise.allSettled(favs.slice(0,20).map(f=>getGlobalSvtSlug(f.id)));
+  const svtState=_getSvtState();
+  let stateChanged=false;
   for(let idx=0;idx<Math.min(favs.length,20);idx++){
     const fav=favs[idx];
     const meta=slugMeta[idx].status==='fulfilled'?slugMeta[idx].value:null;
@@ -1248,35 +1258,31 @@ async function checkSvtNotificationsBackground(){
         const epNum=parseInt(m[2]);
         const segEnd=epMatches[i+1]?.index??epHtml.length;
         const seg=epHtml.slice(m.index,segEnd).toLowerCase();
-        // Stejná detekce jako svtEpisodes — bez reliability resetu, aby per-epizoda bylo přesné
-        const hasSubs=/dabing|\bdab\b|titulky|\btit\b/.test(seg);
-        return{s:latestSeason,e:epNum,hasSubs};
+        return{s:latestSeason,e:epNum,hasSubs:/dabing|\bdab\b|titulky|\btit\b/.test(seg)};
       });
 
-      // 3) První scan?
-      const seenKey=_SVT_EP_SEEN+meta.slug;
-      const seenState=JSON.parse(localStorage.getItem(seenKey)||'null');
-      const isFirstScan=!seenState;
-      const latest=eps[eps.length-1];
-      if(!seenState||(latestSeason>seenState.s||(latestSeason===seenState.s&&latest.e>seenState.e)))
-        localStorage.setItem(seenKey,JSON.stringify({s:latestSeason,e:latest.e}));
+      // 3) Porovnej se stavem z Firestore (sync proběhl před tímto voláním)
+      const animeState=svtState[fav.id];
+      const isFirstScan=!animeState;
+      const prevSubs=animeState?.subs||{};
+      const newSubs={...prevSubs};
 
-      // 4) Zkontroluj posledních 5 epizod
       for(const ep of eps.slice(-5)){
-        const subKey=`svt_sub_${meta.slug}_${ep.s}_${ep.e}`;
-        const subState=JSON.parse(localStorage.getItem(subKey)||'null');
-        if(subState?.hasSubs)continue;
-        if(isFirstScan){
-          localStorage.setItem(subKey,JSON.stringify({hasSubs:ep.hasSubs,ts:Date.now()}));
-        }else if(!subState){
-          localStorage.setItem(subKey,JSON.stringify({hasSubs:ep.hasSubs,ts:Date.now()}));
-          if(ep.hasSubs)await _createSvtNotif(fav,meta,ep);
-        }else if(!subState.hasSubs&&ep.hasSubs){
-          localStorage.setItem(subKey,JSON.stringify({hasSubs:true,ts:Date.now()}));
+        const epKey=`${ep.s}_${ep.e}`;
+        const wasSubs=prevSubs[epKey]; // true | false | undefined
+        newSubs[epKey]=ep.hasSubs;
+        // Notifikace: epizoda přešla na "má titulky" — nebo je nová a hned má titulky
+        if(!isFirstScan&&(wasSubs===false||wasSubs===undefined)&&ep.hasSubs){
           await _createSvtNotif(fav,meta,ep);
         }
       }
+      svtState[fav.id]={slug:meta.slug,subs:newSubs};
+      stateChanged=true;
     }catch(e){console.warn('[SVT notif]',meta.slug,e.message);}
+  }
+  if(stateChanged){
+    _saveSvtState(svtState);
+    _saveSvtStateToFirestore(svtState);
   }
   localStorage.setItem(_SVT_CHECK_TS,Date.now().toString());
   _updateNotifBadge(_getSvtNotifs().filter(n=>!n.read).length);
