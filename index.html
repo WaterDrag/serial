@@ -37,12 +37,21 @@
     <h2 id="sectionTitle">Výběr</h2>
   </div>
 
-  <div class="filter-tabs">
+  <div class="filter-tabs" id="mainFilterRow">
     <button class="filter-tab active" onclick="switchFilter(this,'TRENDING')">Výběr</button>
     <button class="filter-tab" onclick="switchFilter(this,'POPULAR')">Populární</button>
     <button class="filter-tab" onclick="switchFilter(this,'TOP_RATED')">Top hodnocení</button>
     <button class="filter-tab" id="seasonalTab" onclick="switchFilter(this,'SEASONAL')">Tato sezona</button>
     <button class="filter-tab" onclick="switchFilter(this,'SVT_NEW')">CZ Novinky</button>
+  </div>
+  <div class="filter-tabs" id="animeModeRow" style="margin-top:-8px;">
+    <button class="filter-tab active" onclick="switchAnimeFilter(this,'anime')">Jen anime</button>
+    <button class="filter-tab" onclick="switchAnimeFilter(this,'all')">Vše</button>
+    <button class="filter-tab" onclick="switchAnimeFilter(this,'no-anime')">Skrýt anime</button>
+    <label id="svtOnlyLabel" style="display:none;align-items:center;gap:6px;margin-left:auto;font-size:13px;color:var(--text-2);cursor:pointer;">
+      <input type="checkbox" id="svtOnlyToggle" checked onchange="toggleSvtOnly(this)" style="accent-color:var(--accent);width:15px;height:15px;">
+      Jen SVT
+    </label>
   </div>
 
   <!-- Nové epizody z oblíbených -->

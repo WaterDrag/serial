@@ -177,6 +177,7 @@ async function syncFromFirestore() {
     }
     if (d.history) localStorage.setItem('ani_history', JSON.stringify(d.history));
     if (d.svtState) _saveSvtState(d.svtState);
+    if (d.svtNewSeries) _saveSvtNewSeries(d.svtNewSeries);
   } catch(e) {
     console.warn('[Firebase] sync error:', e);
   }
@@ -435,7 +436,7 @@ const state={
   modes:{svt:false,animegg:false},
   animeggSlug:null,animeggEpisodes:[],animeggHasDub:false,animeggIsDub:false,
   svtSources:[],svtSourceIndex:0,
-  page:1,filter:'TRENDING',
+  page:1,filter:'TRENDING',animeMode:'anime',svtOnly:true,
   hlsInstance:null,
 };
 
@@ -529,7 +530,10 @@ function normalizeTmdb(item){
 async function fetchList(sortKey,page=1,extra=''){
   const today=new Date().toISOString().split('T')[0];
   const sortMap={TRENDING_DESC:'popularity.desc',POPULARITY_DESC:'popularity.desc',SCORE_DESC:'vote_average.desc',START_DATE_DESC:'first_air_date.desc'};
-  const params={sort_by:sortMap[sortKey]||'popularity.desc',page,with_genres:'16',with_original_language:'ja','first_air_date.lte':today};
+  const params={sort_by:sortMap[sortKey]||'popularity.desc',page,'first_air_date.lte':today};
+  if(state.animeMode==='anime'){params.with_genres='16';params.with_original_language='ja';}
+  else if(state.animeMode==='no-anime'){params.without_genres='16';}
+  // 'all' — no genre/language restriction
   if(sortKey==='TRENDING_DESC'){
     // "Trending" = highly popular anime aired in the last 90 days
     const d=new Date();d.setDate(d.getDate()-90);
@@ -1622,9 +1626,16 @@ async function loadFilter(filter,append=false){
   }
 }
 function switchFilter(btn,filter){
-  document.querySelectorAll('.filter-tab').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('#mainFilterRow .filter-tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');state.filter=filter;state.page=1;
+  const svtLabel=document.getElementById('svtOnlyLabel');
+  if(svtLabel)svtLabel.style.display=filter==='SVT_NEW'?'flex':'none';
   if(filter==='SVT_NEW')loadSvtNewEpisodes();else loadFilter(filter);
+}
+function switchAnimeFilter(btn,mode){
+  document.querySelectorAll('#animeModeRow .filter-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');state.animeMode=mode;state.page=1;
+  if(state.filter==='SVT_NEW')loadSvtNewEpisodes();else loadFilter(state.filter);
 }
 function loadMore(){state.page++;loadFilter(state.filter,true);}
 
@@ -1670,36 +1681,102 @@ async function initHomeNotifications(){
   }catch(e){console.warn('[HomeNotif]',e.message);}
 }
 
-/* ══ SVT NOVINKY (main page filter) ══════════════════════════════════════ */
-let _svtNewCache=null,_svtNewCacheTs=0;
-const _SVT_NEW_TTL=15*60*1000;
+/* ══ SVT NOVINKY — nově přidané série (store + 21denní okno) ════════════ */
+const _SVT_SERIES_KEY='svt_new_series_v5';
+const _SVT_SERIES_TTL=21*24*3600*1000;
+const _SVT_SERIES_TS='svt_series_ts';
+const _SVT_SERIES_INTERVAL=3*3600*1000;
 const _svtTmdbCache={};
 
-async function fetchSvtNewEpisodes(){
-  if(_svtNewCache&&Date.now()-_svtNewCacheTs<_SVT_NEW_TTL)return _svtNewCache;
-  const html=await proxyFetch('/novinky');
-  const seen=new Set();const results=[];
-  const re=/href="[^"]*\/serial\/([a-z0-9][a-z0-9-]*)\/(s(\d+)e(\d+))[^"]*"/gi;
+function _getSvtNewSeries(){try{return JSON.parse(localStorage.getItem(_SVT_SERIES_KEY)||'{}');}catch{return{};}}
+function _saveSvtNewSeries(obj){localStorage.setItem(_SVT_SERIES_KEY,JSON.stringify(obj));}
+
+async function checkSvtNewSeriesBackground(force=false){
+  if(!getProxy())return;
+  if(!force){
+    const lastCheck=parseInt(localStorage.getItem(_SVT_SERIES_TS)||'0');
+    if(Date.now()-lastCheck<_SVT_SERIES_INTERVAL)return;
+  }
+  const proxy=getProxy();
+  // Set Jen anime + Všechny nové epizody filters silently
+  try{
+    await fetch(proxy+'/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'episodes=1&setFilter=1'});
+    await fetch(proxy+'/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'animeEpisodes=2&setFilterAnime=1'});
+  }catch{}
+  let html;
+  try{html=await proxyFetch('/?ajaxTVShows=true&page=0');}
+  catch{try{html=await proxyFetch('/');}catch{return;}}
+
+  const store=_getSvtNewSeries();
+  let changed=false;
+  const re=/href="\/serial\/([a-z0-9-]+)\/(s(\d+)e(\d+))"/gi;
   let m;
   while((m=re.exec(html))!==null){
-    const slug=m[1],epCode=m[2],season=parseInt(m[3]),episode=parseInt(m[4]);
-    const uniq=slug+epCode;
-    if(seen.has(uniq))continue;seen.add(uniq);
-    const segStart=Math.max(0,m.index-1200);
-    const segEnd=Math.min(html.length,m.index+800);
+    const slug=m[1],season=parseInt(m[3]),episode=parseInt(m[4]);
+    // Trigger on first episode — indicates a new series/season being added
+    if(episode!==1)continue;
+    if(store[slug])continue; // already tracked
+    const segStart=Math.max(0,m.index-100);
+    const segEnd=Math.min(html.length,m.index+900);
     const seg=html.slice(segStart,segEnd);
-    const titleM=seg.match(/alt="([^"]{5,80})"/)||seg.match(/class="[^"]*title[^"]*"[^>]*>([^<]{3,80})/i);
-    const title=titleM?titleM[1].trim().replace(/&amp;/g,'&').replace(/&#039;/g,"'"):slug.replace(/-/g,' ');
-    const thumbMs=[...seg.matchAll(/src="(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp)(?:\?[^"]*)?[^"]*)"/gi)];
-    const thumb=thumbMs.length?thumbMs[thumbMs.length-1][1]:'';
-    const hasTit=/\btit\b|titulky/i.test(seg);
-    const hasDab=/\bdab\b|dabing/i.test(seg);
-    const timeM=seg.match(/před\s+(\d+\s*(?:min(?:utami?)?|hod(?:inami?)?|h(?!\w)|dnem|dny|dní|tý?dny?|měsíc(?:i)?)[^<"]{0,15})/i);
-    const timeStr=timeM?'Před '+timeM[1].trim():'';
-    results.push({slug,title,season,episode,epCode,thumb,hasTit,hasDab,timeStr});
+    const titleM=seg.match(/<span class="episode-number nunito">\s*<span>([^<]+)<\/span>/);
+    const altM=seg.match(/alt="([^"]+)"/);
+    const title=(titleM?titleM[1]:altM?altM[1]:slug.replace(/-/g,' ')).trim()
+      .replace(/&amp;/g,'&').replace(/&#039;/g,"'").replace(/&quot;/g,'"');
+    const thumbM=seg.match(/src="(\/assets\/img\/uploads\/wallpapers\/[^"]+)"/);
+    const thumb=thumbM?thumbM[1]:''; // relative — proxy prefix added at render time
+    const hasTit=/episode-cc/.test(seg);
+    const hasDab=/episode-dub/.test(seg);
+    store[slug]={title,thumb,season,firstSeen:Date.now(),hasTit,hasDab};
+    // TMDB lookup — try SVT title, then slug-derived English title as fallback
+    try{
+      const slugTitle=slug.replace(/-/g,' ');
+      let res=await tmdbFetch('/search/tv',{query:title});
+      let results=res?.results||[];
+      // If no Japanese result and title ≠ slug title, retry with slug-derived English name
+      if(!results.find(r=>r.original_language==='ja')&&title.toLowerCase()!==slugTitle){
+        const res2=await tmdbFetch('/search/tv',{query:slugTitle});
+        const r2=res2?.results||[];
+        if(r2.find(r=>r.original_language==='ja')||(!results.length&&r2.length))results=r2;
+      }
+      const jaMatch=results.find(r=>r.original_language==='ja');
+      if(jaMatch){store[slug].tmdbId=jaMatch.id;store[slug].tmdbPoster=jaMatch.poster_path||null;store[slug].isAnime=true;}
+      else if(results.length>0){const best=results[0];store[slug].tmdbId=best.id;store[slug].tmdbPoster=best.poster_path||null;store[slug].isAnime=false;}
+      else{store[slug].tmdbPoster=null;}
+      store[slug].tmdbDone=true;
+    }catch{} // no tmdbDone → backfill will retry
+    changed=true;
   }
-  _svtNewCache=results;_svtNewCacheTs=Date.now();
-  return results;
+  // Backfill: retry entries where TMDB lookup failed (no tmdbDone flag)
+  for(const [slug,entry] of Object.entries(store)){
+    if(entry.tmdbDone)continue;
+    try{
+      const slugTitle=slug.replace(/-/g,' ');
+      let res=await tmdbFetch('/search/tv',{query:entry.title});
+      let results=res?.results||[];
+      if(!results.find(r=>r.original_language==='ja')&&entry.title.toLowerCase()!==slugTitle){
+        const res2=await tmdbFetch('/search/tv',{query:slugTitle});
+        const r2=res2?.results||[];
+        if(r2.find(r=>r.original_language==='ja')||(!results.length&&r2.length))results=r2;
+      }
+      const jaMatch=results.find(r=>r.original_language==='ja');
+      if(jaMatch){store[slug].tmdbId=jaMatch.id;store[slug].tmdbPoster=jaMatch.poster_path||null;store[slug].isAnime=true;}
+      else if(results.length>0){const best=results[0];store[slug].tmdbId=best.id;store[slug].tmdbPoster=best.poster_path||null;store[slug].isAnime=false;}
+      else{store[slug].tmdbPoster=null;}
+      store[slug].tmdbDone=true;
+    }catch{} // retry next scan
+    changed=true;
+  }
+  // Prune entries older than 21 days
+  const cutoff=Date.now()-_SVT_SERIES_TTL;
+  for(const slug of Object.keys(store)){
+    if(store[slug].firstSeen<cutoff){delete store[slug];changed=true;}
+  }
+  if(changed){
+    _saveSvtNewSeries(store);
+    if(fbDb&&fbUid)setDoc(doc(fbDb,'users',fbUid),{svtNewSeries:store},{merge:true}).catch(()=>{});
+  }
+  localStorage.setItem(_SVT_SERIES_TS,Date.now().toString());
 }
 
 async function loadSvtNewEpisodes(){
@@ -1707,32 +1784,103 @@ async function loadSvtNewEpisodes(){
   const btn=document.getElementById('loadMoreBtn');
   if(btn)btn.style.display='none';
   document.getElementById('sectionTitle').textContent='CZ/SK Novinky';
-  renderSkeletons();
-  try{
-    const eps=await fetchSvtNewEpisodes();
-    if(!eps.length){
-      grid.innerHTML='<div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:40px;">Žádné novinky nenalezeny.</div>';
+
+  const _render=(store)=>{
+    const proxy=getProxy();
+    const cutoff=Date.now()-_SVT_SERIES_TTL;
+    const series=Object.entries(store)
+      .filter(([,v])=>v.firstSeen>cutoff)
+      .filter(([,v])=>{
+        if(state.animeMode==='anime')return v.isAnime!==false;
+        if(state.animeMode==='no-anime')return v.isAnime===false;
+        return true;
+      })
+      .sort(([,a],[,b])=>b.firstSeen-a.firstSeen)
+      .map(([slug,v])=>({slug,...v}));
+    if(!series.length){
+      grid.innerHTML='<div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:40px;">Žádné výsledky pro aktuální filtr.</div>';
       return;
     }
-    grid.innerHTML=eps.slice(0,24).map(ep=>{
-      const s2=String(ep.season).padStart(2,'0');
-      const e2=String(ep.episode).padStart(2,'0');
+    grid.innerHTML=series.slice(0,24).map(s=>{
+      // Prefer TMDB poster, fallback to SVT thumbnail
+      if(s.tmdbId)_svtTmdbCache[s.slug]=s.tmdbId;
+      const imgSrc=s.tmdbPoster?`${TMDB_IMG}${s.tmdbPoster}`:(s.thumb?proxy+s.thumb:'');
+      const daysAgo=Math.floor((Date.now()-s.firstSeen)/(24*3600*1000));
+      const timeLabel=daysAgo===0?'Dnes přidáno':daysAgo===1?'Přidáno včera':`Přidáno před ${daysAgo} dny`;
       const badges=[
-        ep.hasTit?'<span style="font-size:9px;font-weight:800;background:#22c55e;color:#fff;border-radius:4px;padding:1px 5px;line-height:1.6;">TIT</span>':'',
-        ep.hasDab?'<span style="font-size:9px;font-weight:800;background:var(--accent);color:#fff;border-radius:4px;padding:1px 5px;line-height:1.6;">DAB</span>':'',
+        s.hasTit?'<span style="font-size:9px;font-weight:800;background:#22c55e;color:#fff;border-radius:4px;padding:1px 5px;line-height:1.6;">TIT</span>':'',
+        s.hasDab?'<span style="font-size:9px;font-weight:800;background:var(--accent);color:#fff;border-radius:4px;padding:1px 5px;line-height:1.6;">DAB</span>':'',
       ].filter(Boolean).join('');
-      const thumbHtml=ep.thumb?`<img src="${ep.thumb}" loading="lazy" style="width:100%;height:100%;object-fit:cover;">`:'';
-      return`<div class="anime-card" onclick="svtNewCardClick(this,'${ep.slug}',${ep.season},${ep.episode})" style="cursor:pointer;">
-        <div class="card-thumb" style="position:relative;">${thumbHtml}<div style="position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,.8);color:#fff;font-size:10px;font-weight:800;border-radius:4px;padding:2px 6px;">S${s2}E${e2}</div></div>
+      const thumbHtml=imgSrc?`<img src="${imgSrc}" loading="lazy" style="width:100%;height:100%;object-fit:cover;">`:'';
+      return`<div class="anime-card" onclick="svtNewCardClick(this,'${s.slug}',${s.season},1)" style="cursor:pointer;">
+        <div class="card-thumb">${thumbHtml}</div>
         <div class="card-info">
-          <div class="card-title">${ep.title}</div>
-          <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:4px;">${badges}${ep.timeStr?`<span style="color:var(--text-3);font-size:11px;">${ep.timeStr}</span>`:''}</div>
+          <div class="card-title">${s.title}</div>
+          <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:4px;">${badges}<span style="color:var(--text-3);font-size:11px;">${timeLabel}</span></div>
         </div>
       </div>`;
     }).join('');
-  }catch(e){
-    grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;color:var(--danger);padding:40px;">Chyba: ${e.message}</div>`;
+  };
+
+  if(!state.svtOnly){
+    // TMDB mode — všechna nová anime za posledních 21 dní
+    renderSkeletons();
+    try{
+      const cutDate=new Date();cutDate.setDate(cutDate.getDate()-21);
+      const gte=cutDate.toISOString().split('T')[0];
+      const today=new Date().toISOString().split('T')[0];
+      const tmdbParams={sort_by:'first_air_date.desc','first_air_date.gte':gte,'first_air_date.lte':today,page:1};
+      if(state.animeMode==='anime'){tmdbParams.with_genres='16';tmdbParams.with_original_language='ja';}
+      else if(state.animeMode==='no-anime'){tmdbParams.without_genres='16';}
+      const data=await tmdbFetch('/discover/tv',tmdbParams);
+      const items=(data.results||[]).map(normalizeTmdb);
+      if(!items.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:40px;">Žádná nová anime za posledních 21 dní.</div>';return;}
+      // Mark which ones are available on SVT
+      const svtStore=_getSvtNewSeries();
+      const svtIds=new Set(Object.values(svtStore).map(v=>v.tmdbId).filter(Boolean));
+      grid.innerHTML=items.slice(0,24).map(a=>{
+        const onSvt=svtIds.has(a.id);
+        const imgSrc=a.coverImage?.large||a.coverImage?.extraLarge||'';
+        const thumb=imgSrc?`<img src="${imgSrc}" loading="lazy" style="width:100%;height:100%;object-fit:cover;">`:'';
+        const titleStr=a.title?.english||a.title?.romaji||'';
+        const svtBadge=onSvt?'<span style="font-size:9px;font-weight:800;background:var(--accent);color:#fff;border-radius:4px;padding:1px 5px;line-height:1.6;">SVT</span>':'';
+        return`<div class="anime-card" onclick="goToAnime(${a.id})" style="cursor:pointer;">
+          <div class="card-thumb">${thumb}</div>
+          <div class="card-info">
+            <div class="card-title">${titleStr}</div>
+            <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:4px;">${svtBadge}<span style="color:var(--text-3);font-size:11px;">${a.seasonYear||''}</span></div>
+          </div>
+        </div>`;
+      }).join('');
+    }catch(e){
+      grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;color:var(--danger);padding:40px;">Chyba: ${e.message}</div>`;
+    }
+    return;
   }
+
+  const store=_getSvtNewSeries();
+  const hasEntries=Object.keys(store).length>0;
+  const needsTmdb=Object.values(store).some(v=>!v.tmdbDone);
+
+  if(!hasEntries){
+    renderSkeletons();
+    try{
+      await checkSvtNewSeriesBackground(true);
+      _render(_getSvtNewSeries());
+    }catch(e){
+      grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;color:var(--danger);padding:40px;">Chyba: ${e.message}</div>`;
+    }
+  }else if(needsTmdb){
+    _render(store);
+    checkSvtNewSeriesBackground(true).then(()=>_render(_getSvtNewSeries())).catch(()=>{});
+  }else{
+    _render(store);
+  }
+}
+
+function toggleSvtOnly(cb){
+  state.svtOnly=cb.checked;
+  if(state.filter==='SVT_NEW')loadSvtNewEpisodes();
 }
 
 async function svtNewCardClick(cardEl,slug,season,episode){
@@ -1740,14 +1888,14 @@ async function svtNewCardClick(cardEl,slug,season,episode){
   cardEl._resolving=true;cardEl.style.opacity='0.6';
   try{
     if(_svtTmdbCache[slug]){
-      window.location.href=`watch.html?id=${_svtTmdbCache[slug]}&ep=${episode}&season=${season}`;return;
+      window.location.href=`watch.html?id=${_svtTmdbCache[slug]}&season=${season}&ep=${episode}`;return;
     }
     const title=cardEl.querySelector('.card-title')?.textContent||slug.replace(/-/g,' ');
     const res=await tmdbFetch('/search/tv',{query:title});
-    const match=(res?.results||[]).find(r=>r.original_language==='ja')||res?.results?.[0];
+    const match=(res?.results||[]).find(r=>r.original_language==='ja');
     if(match){
       _svtTmdbCache[slug]=match.id;
-      window.location.href=`watch.html?id=${match.id}&ep=${episode}&season=${season}`;
+      window.location.href=`watch.html?id=${match.id}&season=${season}&ep=${episode}`;
     }else{
       showToast('Nelze najít v TMDB: '+title,false);
       cardEl.style.opacity='';cardEl._resolving=false;
@@ -1812,6 +1960,7 @@ function initHomePage(){
     initHomeNotifications();
     initNotifBadge();
     checkSvtNotificationsBackground();
+    checkSvtNewSeriesBackground();
   }
 }
 
@@ -2932,7 +3081,7 @@ Object.assign(window, {
   openNotifModal, closeNotifModal,
   openConfig, closeConfig, saveConfig, hideTmdbPrompt,
   applyTheme, applyLayout,
-  switchFilter, loadMore,
+  switchFilter, switchAnimeFilter, toggleSvtOnly, loadMore,
   goHome, goToAnime,
   playNextOrFirstEp, toggleFav,
   switchSeason, activateMode,
