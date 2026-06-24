@@ -1623,7 +1623,8 @@ async function loadFilter(filter,append=false){
 }
 function switchFilter(btn,filter){
   document.querySelectorAll('.filter-tab').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');state.filter=filter;state.page=1;loadFilter(filter);
+  btn.classList.add('active');state.filter=filter;state.page=1;
+  if(filter==='SVT_NEW')loadSvtNewEpisodes();else loadFilter(filter);
 }
 function loadMore(){state.page++;loadFilter(state.filter,true);}
 
@@ -1667,6 +1668,94 @@ async function initHomeNotifications(){
       </div>`;
     }).join('');
   }catch(e){console.warn('[HomeNotif]',e.message);}
+}
+
+/* ══ SVT NOVINKY (main page filter) ══════════════════════════════════════ */
+let _svtNewCache=null,_svtNewCacheTs=0;
+const _SVT_NEW_TTL=15*60*1000;
+const _svtTmdbCache={};
+
+async function fetchSvtNewEpisodes(){
+  if(_svtNewCache&&Date.now()-_svtNewCacheTs<_SVT_NEW_TTL)return _svtNewCache;
+  const html=await proxyFetch('/novinky');
+  const seen=new Set();const results=[];
+  const re=/href="[^"]*\/serial\/([a-z0-9][a-z0-9-]*)\/(s(\d+)e(\d+))[^"]*"/gi;
+  let m;
+  while((m=re.exec(html))!==null){
+    const slug=m[1],epCode=m[2],season=parseInt(m[3]),episode=parseInt(m[4]);
+    const uniq=slug+epCode;
+    if(seen.has(uniq))continue;seen.add(uniq);
+    const segStart=Math.max(0,m.index-1200);
+    const segEnd=Math.min(html.length,m.index+800);
+    const seg=html.slice(segStart,segEnd);
+    const titleM=seg.match(/alt="([^"]{5,80})"/)||seg.match(/class="[^"]*title[^"]*"[^>]*>([^<]{3,80})/i);
+    const title=titleM?titleM[1].trim().replace(/&amp;/g,'&').replace(/&#039;/g,"'"):slug.replace(/-/g,' ');
+    const thumbMs=[...seg.matchAll(/src="(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp)(?:\?[^"]*)?[^"]*)"/gi)];
+    const thumb=thumbMs.length?thumbMs[thumbMs.length-1][1]:'';
+    const hasTit=/\btit\b|titulky/i.test(seg);
+    const hasDab=/\bdab\b|dabing/i.test(seg);
+    const timeM=seg.match(/před\s+(\d+\s*(?:min(?:utami?)?|hod(?:inami?)?|h(?!\w)|dnem|dny|dní|tý?dny?|měsíc(?:i)?)[^<"]{0,15})/i);
+    const timeStr=timeM?'Před '+timeM[1].trim():'';
+    results.push({slug,title,season,episode,epCode,thumb,hasTit,hasDab,timeStr});
+  }
+  _svtNewCache=results;_svtNewCacheTs=Date.now();
+  return results;
+}
+
+async function loadSvtNewEpisodes(){
+  const grid=document.getElementById('animeGrid');
+  const btn=document.getElementById('loadMoreBtn');
+  if(btn)btn.style.display='none';
+  document.getElementById('sectionTitle').textContent='CZ/SK Novinky';
+  renderSkeletons();
+  try{
+    const eps=await fetchSvtNewEpisodes();
+    if(!eps.length){
+      grid.innerHTML='<div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:40px;">Žádné novinky nenalezeny.</div>';
+      return;
+    }
+    grid.innerHTML=eps.slice(0,24).map(ep=>{
+      const s2=String(ep.season).padStart(2,'0');
+      const e2=String(ep.episode).padStart(2,'0');
+      const badges=[
+        ep.hasTit?'<span style="font-size:9px;font-weight:800;background:#22c55e;color:#fff;border-radius:4px;padding:1px 5px;line-height:1.6;">TIT</span>':'',
+        ep.hasDab?'<span style="font-size:9px;font-weight:800;background:var(--accent);color:#fff;border-radius:4px;padding:1px 5px;line-height:1.6;">DAB</span>':'',
+      ].filter(Boolean).join('');
+      const thumbHtml=ep.thumb?`<img src="${ep.thumb}" loading="lazy" style="width:100%;height:100%;object-fit:cover;">`:'';
+      return`<div class="anime-card" onclick="svtNewCardClick(this,'${ep.slug}',${ep.season},${ep.episode})" style="cursor:pointer;">
+        <div class="card-thumb" style="position:relative;">${thumbHtml}<div style="position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,.8);color:#fff;font-size:10px;font-weight:800;border-radius:4px;padding:2px 6px;">S${s2}E${e2}</div></div>
+        <div class="card-info">
+          <div class="card-title">${ep.title}</div>
+          <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:4px;">${badges}${ep.timeStr?`<span style="color:var(--text-3);font-size:11px;">${ep.timeStr}</span>`:''}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){
+    grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;color:var(--danger);padding:40px;">Chyba: ${e.message}</div>`;
+  }
+}
+
+async function svtNewCardClick(cardEl,slug,season,episode){
+  if(cardEl._resolving)return;
+  cardEl._resolving=true;cardEl.style.opacity='0.6';
+  try{
+    if(_svtTmdbCache[slug]){
+      window.location.href=`watch.html?id=${_svtTmdbCache[slug]}&ep=${episode}&season=${season}`;return;
+    }
+    const title=cardEl.querySelector('.card-title')?.textContent||slug.replace(/-/g,' ');
+    const res=await tmdbFetch('/search/tv',{query:title});
+    const match=(res?.results||[]).find(r=>r.original_language==='ja')||res?.results?.[0];
+    if(match){
+      _svtTmdbCache[slug]=match.id;
+      window.location.href=`watch.html?id=${match.id}&ep=${episode}&season=${season}`;
+    }else{
+      showToast('Nelze najít v TMDB: '+title,false);
+      cardEl.style.opacity='';cardEl._resolving=false;
+    }
+  }catch(e){
+    showToast('Chyba: '+e.message,false);
+    cardEl.style.opacity='';cardEl._resolving=false;
+  }
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -2861,4 +2950,5 @@ Object.assign(window, {
   toggleEpWatched,
   carouselNav, carouselGo,
   browseLoadMore,
+  svtNewCardClick,
 });
