@@ -1408,6 +1408,43 @@ function closeNotifModal(){document.getElementById('notifDropdown')?.remove();}
 let _historyTab='favs';
 let _favActiveIds=null,_favActiveTs=0;
 const _FAV_ACTIVE_TTL=3600*1000;
+const _SVT_FAV_CZ_KEY='svt_fav_cz_v1';
+const _SVT_FAV_CZ_TTL=7*24*3600*1000;
+
+async function scanSvtForFavBadges(){
+  if(!getProxy())return;
+  const favs=getFavs();
+  if(!favs.length)return;
+  let cache={};
+  try{cache=JSON.parse(localStorage.getItem(_SVT_FAV_CZ_KEY)||'{}');}catch{}
+  const svtSt=_getSvtState();
+  const now=Date.now();
+  let changed=false;
+  for(const fav of favs){
+    const ex=cache[fav.id];
+    if(ex!==undefined&&now-(ex?.ts||0)<_SVT_FAV_CZ_TTL)continue;
+    try{
+      // 1) svtState (from notification scan — already known slug)
+      let slug=svtSt[fav.id]?.slug||null;
+      // 2) Firebase global slug store (saved when user watched via SVT)
+      if(!slug){const g=await getGlobalSvtSlug(fav.id);slug=g?.slug||null;}
+      // 3) Title search fallback
+      if(!slug)slug=await findSvtSlug({title:{english:fav.title,romaji:fav.title},synonyms:[]});
+
+      if(!slug){cache[fav.id]={slug:null,ts:now};changed=true;await new Promise(r=>setTimeout(r,200));continue;}
+      const showHtml=await proxyFetch(`/serial/${slug}/`);
+      const tvShowId=extractTvShowId(showHtml);
+      if(!tvShowId){cache[fav.id]={slug,hasTit:false,hasDab:false,ts:now};changed=true;await new Promise(r=>setTimeout(r,200));continue;}
+      const eps=await svtEpisodes(slug,1,tvShowId);
+      const hasTit=eps.some(e=>e.hasCz===true&&!e.isDubEp);
+      const hasDab=eps.some(e=>e.hasCz===true&&e.isDubEp);
+      cache[fav.id]={slug,hasTit,hasDab,ts:now};
+      changed=true;
+    }catch{cache[fav.id]={slug:null,ts:now-_SVT_FAV_CZ_TTL+3600*1000};}
+    await new Promise(r=>setTimeout(r,300));
+  }
+  if(changed){localStorage.setItem(_SVT_FAV_CZ_KEY,JSON.stringify(cache));renderHistoryContent();}
+}
 
 async function loadFavActiveIds(){
   const now=Date.now();
@@ -1530,14 +1567,26 @@ function renderHistoryContent(){
     container.innerHTML=`<div style="text-align:center;padding:80px 0;color:var(--text-3);font-size:14px;font-weight:600;">${_historyTab==='favs'?'Žádné oblíbené anime.':'Žádná historie sledování.'}</div>`;
     return;
   }
+  // Primary: dedicated fav CZ scan cache; fallback: svtNewSeries store
+  let _favCz={};
+  try{_favCz=JSON.parse(localStorage.getItem(_SVT_FAV_CZ_KEY)||'{}');}catch{}
+  const _nsById={};
+  for(const e of Object.values(_getSvtNewSeries())){if(e.tmdbId)_nsById[e.tmdbId]=e;}
   container.innerHTML=`<div class="anime-grid">${items.map(a=>{
     const watched=getWatchedEpCount(a.id);
     const badge=watched?`<div id="epbadge-${a.id}" class="card-ep-badge" style="background:#000;color:#fff;">${watched} / ?</div>`:'';
+    const czE=_favCz[a.id];   // from dedicated scan
+    const nsE=_nsById[a.id];  // from svtNewSeries store (fallback)
+    const onSvt=czE?.slug||nsE;
+    let titLabel;
+    if(czE?.slug){titLabel=czE.hasTit&&czE.hasDab?'TIT+DAB':czE.hasDab?'DAB':czE.hasTit?'TIT':'SVT';}
+    else if(nsE){titLabel=nsE.hasTit&&nsE.hasDab?'TIT+DAB':nsE.hasDab?'DAB':nsE.hasTit?'TIT':'SVT';}
+    const titBadge=onSvt?`<div class="card-tit-badge"${(!titLabel||titLabel==='SVT')?' style="background:#1d4ed8;"':''}>${titLabel||'SVT'}</div>`:'';
     return `<div class="anime-card" onclick="goToAnime(${a.id})">
       <div class="card-poster">
         <img src="${a.cover||''}" loading="lazy">
         ${a.score?`<div class="card-rating">★ ${(a.score/10).toFixed(1)}</div>`:''}
-        ${badge}
+        ${badge}${titBadge}
         <div class="card-overlay"><div class="play-icon"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg></div></div>
       </div>
       <div class="card-title">${a.title||''}</div>
@@ -1558,6 +1607,8 @@ function initHistoryPage(){
       renderHistoryContent();
     });
   });
+  // Scan SVT for all favorites in background — badges appear when done
+  if(getProxy()) scanSvtForFavBadges().catch(()=>{});
 }
 
 /* ══════════════════════════════════════════════════════════

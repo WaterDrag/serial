@@ -120,6 +120,7 @@ input,select,textarea{font-family:inherit;outline:none}
 .anime-card:hover .card-poster img{transform:scale(1.05)}
 .card-rating{position:absolute;top:8px;right:8px;background:#000;color:var(--warn);font-size:11px;font-weight:800;padding:4px 8px;border-radius:6px;}
 .card-ep-badge{position:absolute;bottom:8px;left:8px;background:#000;color:var(--text-1);font-size:11px;font-weight:700;padding:4px 8px;border-radius:6px;}
+.card-tit-badge{position:absolute;bottom:8px;right:8px;background:#16a34a;color:#fff;font-size:10px;font-weight:800;padding:3px 7px;border-radius:6px;letter-spacing:.2px;}
 .card-overlay{position:absolute;inset:0;background:rgba(0,0,0,.4);opacity:0;transition:opacity .2s;display:flex;align-items:center;justify-content:center;}
 .anime-card:hover .card-overlay{opacity:1}
 .play-icon{width:48px;height:48px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.5);}
