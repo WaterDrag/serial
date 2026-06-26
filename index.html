@@ -56,9 +56,13 @@
 
   <!-- Nové epizody z oblíbených -->
   <div id="homeNewEpsSection" style="display:none;margin-bottom:2.5rem;">
-    <div class="section-label" style="margin-bottom:16px;">
+    <div class="section-label" style="margin-bottom:10px;">
       <div class="dot"></div>
-      <h2>Nové epizody z oblíbených</h2>
+      <h2 id="homeEpsTitle">Nové epizody z oblíbených</h2>
+      <div style="margin-left:auto;display:flex;gap:6px;">
+        <button class="filter-chip active" id="homeNotifRecent" onclick="switchHomeNotifMode('recent')">Nedávné</button>
+        <button class="filter-chip" id="homeNotifUpcoming" onclick="switchHomeNotifMode('upcoming')">Brzy</button>
+      </div>
     </div>
     <div class="new-eps-row" id="homeNewEpsGrid"></div>
   </div>

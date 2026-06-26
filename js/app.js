@@ -1406,6 +1406,35 @@ function closeNotifModal(){document.getElementById('notifDropdown')?.remove();}
    HISTORY PAGE
 ══════════════════════════════════════════════════════════ */
 let _historyTab='favs';
+let _favActiveIds=null,_favActiveTs=0;
+const _FAV_ACTIVE_TTL=3600*1000;
+
+async function loadFavActiveIds(){
+  const now=Date.now();
+  if(_favActiveIds!==null&&now-_favActiveTs<_FAV_ACTIVE_TTL){renderHistoryContent();return;}
+  const favs=getFavs();
+  if(!favs.length){_favActiveIds=[];_favActiveTs=now;renderHistoryContent();return;}
+  const cutoff=15*24*3600*1000;
+  const allResults=[];
+  for(let i=0;i<favs.length;i+=20){
+    const batch=await Promise.allSettled(favs.slice(i,i+20).map(f=>tmdbFetch(`/tv/${f.id}`)));
+    allResults.push(...batch);
+  }
+  const ids=[];
+  allResults.forEach(r=>{
+    if(r.status!=='fulfilled')return;
+    const show=r.value;
+    const ep=show.last_episode_to_air;
+    const nextEp=show.next_episode_to_air;
+    // Include if: next episode is scheduled (actively airing, covers brand-new series with ep1)
+    // OR last episode aired within 15 days (recent activity)
+    const hasNext=!!nextEp?.air_date;
+    const recentLast=ep?.air_date&&(now-new Date(ep.air_date).getTime()<=cutoff);
+    if(hasNext||recentLast)ids.push(show.id);
+  });
+  _favActiveIds=ids;_favActiveTs=now;
+  renderHistoryContent();
+}
 
 function showHistoryTab(tab){
   _historyTab=tab;
@@ -1479,7 +1508,14 @@ function renderHistoryContent(){
   const container=document.getElementById('historyPageContent');
   if(!container)return;
   let items=_historyTab==='favs'?getFavs():getHistory();
-  if(activeFilter!=='all'){
+  if(activeFilter==='active'){
+    if(_favActiveIds===null){
+      container.innerHTML='<div style="text-align:center;padding:60px 0;color:var(--text-3);"><div class="spinner" style="margin:0 auto;"></div></div>';
+      loadFavActiveIds();
+      return;
+    }
+    items=items.filter(a=>_favActiveIds.includes(a.id));
+  }else if(activeFilter!=='all'){
     items=items.filter(a=>{
       const st=getAnimeWatchStatus(a.id);
       return activeFilter==='watched'?st!=='none':st==='none';
@@ -1610,7 +1646,14 @@ async function loadFilter(filter,append=false){
   if(!append){renderSkeletons();state.page=1;document.getElementById('sectionTitle').textContent=f.label;}
   const btn=document.getElementById('loadMoreBtn');btn.disabled=true;
   try{
-    const{items,hasMore}=await fetchList(f.sort,state.page,f.extra);
+    let items,hasMore;
+    if(!append){
+      // Fetch pages 1 + 2 simultaneously for initial load → more items in grid
+      const[r1,r2]=await Promise.all([fetchList(f.sort,1,f.extra),fetchList(f.sort,2,f.extra)]);
+      items=[...r1.items,...r2.items];hasMore=r2.hasMore;state.page=2;
+    }else{
+      ({items,hasMore}=await fetchList(f.sort,state.page,f.extra));
+    }
     const unique=[],seen=new Set();
     for(const item of items){const base=simplifyTitle(getTitle(item));if(base&&!seen.has(base)){seen.add(base);unique.push(item);}}
     if(!append&&unique.length>0){
@@ -1639,6 +1682,55 @@ function switchAnimeFilter(btn,mode){
 }
 function loadMore(){state.page++;loadFilter(state.filter,true);}
 
+let _homeNotifCache=null; // array of TMDB show objects for all favs
+
+function renderHomeNotifs(mode){
+  const section=document.getElementById('homeNewEpsSection');
+  const grid=document.getElementById('homeNewEpsGrid');
+  if(!section||!grid||!_homeNotifCache)return;
+  const now=Date.now();
+  const cutoff=30*24*3600*1000;
+  let items;
+  if(mode==='upcoming'){
+    items=_homeNotifCache
+      .filter(show=>show.next_episode_to_air?.air_date)
+      .map(show=>({show,ep:show.next_episode_to_air,sortKey:new Date(show.next_episode_to_air.air_date).getTime()}))
+      .sort((a,b)=>a.sortKey-b.sortKey);
+  }else{
+    items=_homeNotifCache
+      .filter(show=>show.last_episode_to_air?.air_date)
+      .map(show=>({show,ep:show.last_episode_to_air,sortKey:now-new Date(show.last_episode_to_air.air_date).getTime()}))
+      .sort((a,b)=>a.sortKey-b.sortKey);
+  }
+  const titleEl=document.getElementById('homeEpsTitle');
+  if(titleEl)titleEl.textContent=mode==='upcoming'?'Brzy vychází z oblíbených':'Nové epizody z oblíbených';
+  document.querySelectorAll('#homeNotifRecent,#homeNotifUpcoming').forEach(b=>b.classList.remove('active'));
+  const activeBtn=document.getElementById(mode==='upcoming'?'homeNotifUpcoming':'homeNotifRecent');
+  if(activeBtn)activeBtn.classList.add('active');
+  if(!items.length){section.style.display='none';return;}
+  section.style.display='block';
+  grid.innerHTML=items.map(({show,ep})=>{
+    const title=show.name||'—';
+    const date=new Date(ep.air_date).toLocaleDateString('cs-CZ',{day:'numeric',month:'short'});
+    const cover=show.poster_path?TMDB_IMG+show.poster_path:'';
+    const onclick=mode==='upcoming'
+      ?`goToAnime(${show.id})`
+      :`window.location.href='watch.html?id=${show.id}&ep=${ep.episode_number}&season=${ep.season_number}'`;
+    return `<div class="new-ep-card" onclick="${onclick}" style="cursor:pointer;">
+      <div class="new-ep-thumb">
+        <img src="${cover}" loading="lazy">
+        <div class="new-ep-badge">Ep. ${ep.episode_number}</div>
+      </div>
+      <div class="new-ep-title">${title}</div>
+      <div class="new-ep-date">${date}</div>
+    </div>`;
+  }).join('');
+}
+
+function switchHomeNotifMode(mode){
+  renderHomeNotifs(mode);
+}
+
 async function initHomeNotifications(){
   const favs=getFavs();
   if(!favs.length)return;
@@ -1646,38 +1738,12 @@ async function initHomeNotifications(){
   const grid=document.getElementById('homeNewEpsGrid');
   if(!section||!grid)return;
   try{
-    const sevenDays=14*24*3600*1000,now=Date.now();
-    // Fetch in batches to avoid too many parallel requests
-    const allResults=[];
-    for(let i=0;i<favs.length;i+=20){
-      const batch=await Promise.allSettled(favs.slice(i,i+20).map(f=>tmdbFetch(`/tv/${f.id}`)));
-      allResults.push(...batch);
-    }
-    const items=[];
-    allResults.forEach(r=>{
-      if(r.status!=='fulfilled')return;
-      const show=r.value,ep=show.last_episode_to_air;
-      if(!ep?.air_date)return;
-      const age=now-new Date(ep.air_date).getTime();
-      if(age>sevenDays)return;
-      items.push({show,ep,age});
-    });
-    if(!items.length)return;
-    items.sort((a,b)=>a.age-b.age);
-    section.style.display='block';
-    grid.innerHTML=items.map(({show,ep})=>{
-      const title=show.name||'—';
-      const date=new Date(ep.air_date).toLocaleDateString('cs-CZ',{day:'numeric',month:'short'});
-      const cover=show.poster_path?TMDB_IMG+show.poster_path:'';
-      return `<div class="new-ep-card" onclick="window.location.href='watch.html?id=${show.id}&ep=${ep.episode_number}&season=${ep.season_number}'">
-        <div class="new-ep-thumb">
-          <img src="${cover}" loading="lazy">
-          <div class="new-ep-badge">Ep. ${ep.episode_number}</div>
-        </div>
-        <div class="new-ep-title">${title}</div>
-        <div class="new-ep-date">${date}</div>
-      </div>`;
-    }).join('');
+    const allResults=await Promise.allSettled(favs.map(f=>tmdbFetch(`/tv/${f.id}`)));
+    _homeNotifCache=allResults.filter(r=>r.status==='fulfilled').map(r=>r.value);
+    // Default to recent; if nothing recent, auto-switch to upcoming
+    const now=Date.now(),cutoff=30*24*3600*1000;
+    const hasRecent=_homeNotifCache.some(s=>{const ep=s.last_episode_to_air;return ep?.air_date&&now-new Date(ep.air_date).getTime()<=cutoff;});
+    renderHomeNotifs(hasRecent?'recent':'upcoming');
   }catch(e){console.warn('[HomeNotif]',e.message);}
 }
 
@@ -3081,7 +3147,7 @@ Object.assign(window, {
   openNotifModal, closeNotifModal,
   openConfig, closeConfig, saveConfig, hideTmdbPrompt,
   applyTheme, applyLayout,
-  switchFilter, switchAnimeFilter, toggleSvtOnly, loadMore,
+  switchFilter, switchAnimeFilter, toggleSvtOnly, loadMore, switchHomeNotifMode,
   goHome, goToAnime,
   playNextOrFirstEp, toggleFav,
   switchSeason, activateMode,
