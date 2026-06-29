@@ -119,9 +119,9 @@ async function listSubs(kv) {
   const idx = await kv.get(KV_SUBS_INDEX, { type:'json' }) || [];
   return (await Promise.all(idx.map(h => kv.get('sub:'+h, { type:'json' })))).filter(Boolean);
 }
-async function saveSub(kv, ep, keys, favIds, slugMap, favMeta) {
+async function saveSub(kv, ep, keys, favIds, slugMap, favMeta, appBase) {
   const h = await epHash(ep);
-  await kv.put('sub:'+h, JSON.stringify({ endpoint:ep, keys, favIds, slugMap, favMeta, ts:Date.now() }));
+  await kv.put('sub:'+h, JSON.stringify({ endpoint:ep, keys, favIds, slugMap, favMeta, appBase:appBase||'', ts:Date.now() }));
   const idx = await kv.get(KV_SUBS_INDEX, { type:'json' }) || [];
   if (!idx.includes(h)) { idx.push(h); await kv.put(KV_SUBS_INDEX, JSON.stringify(idx)); }
 }
@@ -149,8 +149,8 @@ function ok(body = 'OK') { return new Response(body, { headers: { ...CORS, 'Cont
 /* ── Fetch handlers ─────────────────────────────────────── */
 
 async function handleSubscribe(req, env) {
-  const { subscription, favIds, slugMap, favMeta } = await req.json();
-  await saveSub(env.PUSH_KV, subscription.endpoint, subscription.keys, favIds||[], slugMap||{}, favMeta||{});
+  const { subscription, favIds, slugMap, favMeta, appBase } = await req.json();
+  await saveSub(env.PUSH_KV, subscription.endpoint, subscription.keys, favIds||[], slugMap||{}, favMeta||{}, appBase||'');
   return ok();
 }
 async function handleUnsubscribe(req, env) {
@@ -241,11 +241,12 @@ async function runCron(env) {
       const e      = String(epInfo.ep).padStart(2, '0');
       const lang   = epInfo.hasDab ? 'CZ dabing+titulky' : epInfo.hasTit ? 'CZ titulky' : 'CZ dostupné';
 
+      const base  = (sub.appBase || '').replace(/\/$/, '');
       const payload = {
         title: meta.title || `Anime #${tmdbId}`,
         body:  `S${s} E${e} · ${lang}`,
         icon:  meta.poster || '',
-        url:   `/watch.html?id=${tmdbId}&ep=${epInfo.ep}&season=${epInfo.season}`,
+        url:   `${base}/watch.html?id=${tmdbId}&ep=${epInfo.ep}&season=${epInfo.season}`,
         tag:   `ws-${tmdbId}-s${s}e${e}`,
       };
 

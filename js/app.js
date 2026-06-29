@@ -3228,7 +3228,7 @@ function _vapidKeyToUint8(b64url){
 
 async function _getPushRegistration(){
   if(!('serviceWorker' in navigator)||!('PushManager' in window))return null;
-  try{return await navigator.serviceWorker.register('/sw.js');}catch{return null;}
+  try{return await navigator.serviceWorker.register('./sw.js');}catch{return null;}
 }
 
 async function registerPushNotifications(){
@@ -3248,7 +3248,7 @@ async function registerPushNotifications(){
       sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_vapidKeyToUint8(_VAPID_PUBLIC_KEY)});
     }
     const{favIds,slugMap,favMeta}=_buildPushSyncData();
-    const res=await fetch(pushUrl+'/push-subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:{endpoint:sub.endpoint,keys:{p256dh:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''),auth:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')}},favIds,slugMap,favMeta})});
+    const res=await fetch(pushUrl+'/push-subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:{endpoint:sub.endpoint,keys:{p256dh:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''),auth:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')}},favIds,slugMap,favMeta,appBase})});
     if(!res.ok)throw new Error('Worker odpověděl '+res.status);
     showToast('Push notifikace zapnuty ✓',true);
     _updatePushBtn(true);
@@ -3283,7 +3283,8 @@ function _buildPushSyncData(){
   for(const e of Object.values(svtSeries))if(e.tmdbId&&e.tmdbPoster)posterMap[e.tmdbId]=TMDB_IMG.replace('w500','w92')+e.tmdbPoster;
   const favMeta={};
   for(const f of favs)favMeta[f.id]={title:f.title||'',poster:posterMap[f.id]||''};
-  return{favIds,slugMap,favMeta};
+  const appBase=location.origin+location.pathname.replace(/\/[^/]*$/,'/');
+  return{favIds,slugMap,favMeta,appBase};
 }
 
 async function syncFavsToWorker(){
