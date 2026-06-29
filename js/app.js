@@ -3293,11 +3293,11 @@ async function syncFavsToWorker(){
   if(!('serviceWorker' in navigator))return;
   try{
     await navigator.serviceWorker.ready;
-    const reg=await navigator.serviceWorker.getRegistration('/sw.js');
+    const reg=await navigator.serviceWorker.getRegistration();
     if(!reg)return;
     const sub=await reg.pushManager.getSubscription();
     if(!sub)return;
-    const{favIds,slugMap,favMeta}=_buildPushSyncData();
+    const{favIds,slugMap,favMeta,appBase}=_buildPushSyncData();
     fetch(pushUrl+'/push-sync-favs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endpoint:sub.endpoint,favIds,slugMap,favMeta})}).catch(()=>{});
   }catch{}
 }
@@ -3316,7 +3316,7 @@ async function _initPushBtn(){
     btn.textContent='Push není podporováno';btn.disabled=true;return;
   }
   try{
-    const reg=await navigator.serviceWorker.getRegistration('/sw.js');
+    const reg=await navigator.serviceWorker.getRegistration();
     const sub=reg?await reg.pushManager.getSubscription():null;
     _updatePushBtn(!!sub);
   }catch{_updatePushBtn(false);}
