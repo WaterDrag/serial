@@ -3247,7 +3247,7 @@ async function registerPushNotifications(){
     if(!sub){
       sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_vapidKeyToUint8(_VAPID_PUBLIC_KEY)});
     }
-    const{favIds,slugMap,favMeta}=_buildPushSyncData();
+    const{favIds,slugMap,favMeta,appBase}=_buildPushSyncData();
     const res=await fetch(pushUrl+'/push-subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:{endpoint:sub.endpoint,keys:{p256dh:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''),auth:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')}},favIds,slugMap,favMeta,appBase})});
     if(!res.ok)throw new Error('Worker odpověděl '+res.status);
     showToast('Push notifikace zapnuty ✓',true);
