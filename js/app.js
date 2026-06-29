@@ -362,7 +362,7 @@ function openConfig(){
           <input class="config-input" type="text" id="cfgPushWorker" placeholder="https://ws-push.zitkatomik007.workers.dev">
           <div class="config-hint">URL nového Push Workeru (worker-push.js). Bez tohoto pole push notifikace nefungují.</div>
         </div>
-        <button id="pushToggleBtn" class="btn-save" style="margin-top:8px;background:var(--surface);color:var(--text-1);border:1px solid var(--border);">🔔 Zapnout push</button>`;
+        <button id="pushToggleBtn" class="btn-outline" style="margin-top:8px;width:100%;padding:10px;border-radius:10px;font-size:13px;font-weight:700;">🔔 Zapnout push</button>`;
       if(saveBtn)modal.insertBefore(ps,saveBtn);else modal.appendChild(ps);
       _initPushBtn();
     }
