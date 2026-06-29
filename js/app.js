@@ -352,6 +352,20 @@ function openConfig(){
       _initCustomSliders();
     }
     _syncAppearUI();
+    if(!document.getElementById('pushSection')){
+      const saveBtn=modal.querySelector('.btn-save');
+      const ps=document.createElement('div');
+      ps.className='config-section';ps.id='pushSection';
+      ps.innerHTML=`<div class="config-section-title">🔔 Push notifikace (pozadí)</div>
+        <div class="config-field">
+          <label class="config-label">Push Worker URL <span id="pushWorkerStatus" class="config-status"></span></label>
+          <input class="config-input" type="text" id="cfgPushWorker" placeholder="https://ws-push.zitkatomik007.workers.dev">
+          <div class="config-hint">URL nového Push Workeru (worker-push.js). Bez tohoto pole push notifikace nefungují.</div>
+        </div>
+        <button id="pushToggleBtn" class="btn-save" style="margin-top:8px;background:var(--surface);color:var(--text-1);border:1px solid var(--border);">🔔 Zapnout push</button>`;
+      if(saveBtn)modal.insertBefore(ps,saveBtn);else modal.appendChild(ps);
+      _initPushBtn();
+    }
     if(!document.getElementById('notifPrefsSection')){
       const saveBtn=modal.querySelector('.btn-save');
       const section=document.createElement('div');
@@ -368,6 +382,7 @@ function openConfig(){
   const cfg=getCfg();
   document.getElementById('cfgProxy').value=cfg.proxy||DEFAULT_PROXY;
   document.getElementById('cfgSource').value=cfg.defaultSource||'auto';
+  if(document.getElementById('cfgPushWorker')){document.getElementById('cfgPushWorker').value=cfg.pushWorkerUrl||'';setStatusBadge('pushWorkerStatus',!!cfg.pushWorkerUrl);}
   if(document.getElementById('cfgTmdbKey'))document.getElementById('cfgTmdbKey').value=cfg.tmdbKey||'';
   setStatusBadge('tmdbKeyStatus',!!cfg.tmdbKey);
   if(document.getElementById('cfgGeminiKey'))document.getElementById('cfgGeminiKey').value=cfg.geminiKey||'';
@@ -401,6 +416,9 @@ function saveConfig(){
     titulky:document.getElementById('notifTitulky')?.checked!==false,
     dabing:!!document.getElementById('notifDabing')?.checked,
   };
+  const newPushUrl=(document.getElementById('cfgPushWorker')?.value||'').trim().replace(/\/$/,'');
+  if(newPushUrl!==cfg.pushWorkerUrl&&!newPushUrl)unregisterPushNotifications().catch(()=>{});
+  cfg.pushWorkerUrl=newPushUrl;
   setCfg(cfg);closeConfig();showToast('Nastavení uloženo',true);saveSettingsToFirestore();
   if(cfg.tmdbKey)hideTmdbPrompt();
 }
@@ -1799,7 +1817,7 @@ async function initHomeNotifications(){
 }
 
 /* ══ SVT NOVINKY — nově přidané série (store + 21denní okno) ════════════ */
-const _SVT_SERIES_KEY='svt_new_series_v5';
+const _SVT_SERIES_KEY='svt_new_series_v6';
 const _SVT_SERIES_TTL=21*24*3600*1000;
 const _SVT_SERIES_TS='svt_series_ts';
 const _SVT_SERIES_INTERVAL=3*3600*1000;
@@ -1815,7 +1833,6 @@ async function checkSvtNewSeriesBackground(force=false){
     if(Date.now()-lastCheck<_SVT_SERIES_INTERVAL)return;
   }
   const proxy=getProxy();
-  // Set Jen anime + Všechny nové epizody filters silently
   try{
     await fetch(proxy+'/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'episodes=1&setFilter=1'});
     await fetch(proxy+'/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'animeEpisodes=2&setFilterAnime=1'});
@@ -1825,14 +1842,12 @@ async function checkSvtNewSeriesBackground(force=false){
   catch{try{html=await proxyFetch('/');}catch{return;}}
 
   const store=_getSvtNewSeries();
+  const favIds=new Set(getFavs().map(f=>f.id));
   let changed=false;
   const re=/href="\/serial\/([a-z0-9-]+)\/(s(\d+)e(\d+))"/gi;
   let m;
   while((m=re.exec(html))!==null){
     const slug=m[1],season=parseInt(m[3]),episode=parseInt(m[4]);
-    // Trigger on first episode — indicates a new series/season being added
-    if(episode!==1)continue;
-    if(store[slug])continue; // already tracked
     const segStart=Math.max(0,m.index-100);
     const segEnd=Math.min(html.length,m.index+900);
     const seg=html.slice(segStart,segEnd);
@@ -1841,16 +1856,37 @@ async function checkSvtNewSeriesBackground(force=false){
     const title=(titleM?titleM[1]:altM?altM[1]:slug.replace(/-/g,' ')).trim()
       .replace(/&amp;/g,'&').replace(/&#039;/g,"'").replace(/&quot;/g,'"');
     const thumbM=seg.match(/src="(\/assets\/img\/uploads\/wallpapers\/[^"]+)"/);
-    const thumb=thumbM?thumbM[1]:''; // relative — proxy prefix added at render time
+    const thumb=thumbM?thumbM[1]:'';
     const hasTit=/episode-cc/.test(seg);
     const hasDab=/episode-dub/.test(seg);
-    store[slug]={title,thumb,season,firstSeen:Date.now(),hasTit,hasDab};
-    // TMDB lookup — try SVT title, then slug-derived English title as fallback
+
+    if(store[slug]){
+      // Known series — check if this is a newer episode than last seen
+      const prev=store[slug].lastEpSeen||`${store[slug].season||1}_1`;
+      const[ps,pe]=prev.split('_').map(Number);
+      const isNewer=season>ps||(season===ps&&episode>pe);
+      if(!isNewer)continue;
+      store[slug].season=season;store[slug].episode=episode;
+      store[slug].hasTit=hasTit;store[slug].hasDab=hasDab;
+      store[slug].lastEpSeen=`${season}_${episode}`;
+      // Notify if in favorites and TMDB ID known
+      if(store[slug].tmdbId&&favIds.has(store[slug].tmdbId)){
+        const lastN=store[slug].lastNotifiedEp||'0_0';
+        const[lnS,lnE]=lastN.split('_').map(Number);
+        if(season>lnS||(season===lnS&&episode>lnE)){
+          await _createSvtNotif({id:store[slug].tmdbId,title:store[slug].title},{slug,isDub:hasDab&&!hasTit},{s:season,e:episode});
+          store[slug].lastNotifiedEp=`${season}_${episode}`;
+        }
+      }
+      changed=true;
+      continue;
+    }
+    // New slug — record current episode as baseline, no notification on first scan
+    store[slug]={title,thumb,season,episode,firstSeen:Date.now(),hasTit,hasDab,lastEpSeen:`${season}_${episode}`};
     try{
       const slugTitle=slug.replace(/-/g,' ');
       let res=await tmdbFetch('/search/tv',{query:title});
       let results=res?.results||[];
-      // If no Japanese result and title ≠ slug title, retry with slug-derived English name
       if(!results.find(r=>r.original_language==='ja')&&title.toLowerCase()!==slugTitle){
         const res2=await tmdbFetch('/search/tv',{query:slugTitle});
         const r2=res2?.results||[];
@@ -1861,11 +1897,11 @@ async function checkSvtNewSeriesBackground(force=false){
       else if(results.length>0){const best=results[0];store[slug].tmdbId=best.id;store[slug].tmdbPoster=best.poster_path||null;store[slug].isAnime=false;}
       else{store[slug].tmdbPoster=null;}
       store[slug].tmdbDone=true;
-    }catch{} // no tmdbDone → backfill will retry
+    }catch{}
     changed=true;
   }
-  // Backfill: retry entries where TMDB lookup failed (no tmdbDone flag)
-  for(const [slug,entry] of Object.entries(store)){
+  // Backfill: retry TMDB lookup for entries that previously failed
+  for(const[slug,entry]of Object.entries(store)){
     if(entry.tmdbDone)continue;
     try{
       const slugTitle=slug.replace(/-/g,' ');
@@ -1881,7 +1917,7 @@ async function checkSvtNewSeriesBackground(force=false){
       else if(results.length>0){const best=results[0];store[slug].tmdbId=best.id;store[slug].tmdbPoster=best.poster_path||null;store[slug].isAnime=false;}
       else{store[slug].tmdbPoster=null;}
       store[slug].tmdbDone=true;
-    }catch{} // retry next scan
+    }catch{}
     changed=true;
   }
   // Prune entries older than 21 days
@@ -1894,6 +1930,7 @@ async function checkSvtNewSeriesBackground(force=false){
     if(fbDb&&fbUid)setDoc(doc(fbDb,'users',fbUid),{svtNewSeries:store},{merge:true}).catch(()=>{});
   }
   localStorage.setItem(_SVT_SERIES_TS,Date.now().toString());
+  _updateNotifBadge(_getSvtNotifs().filter(n=>!n.read).length);
 }
 
 async function loadSvtNewEpisodes(){
@@ -2637,6 +2674,7 @@ function toggleFav(){
   let f=getFavs();const idx=f.findIndex(x=>x.id===state.currentAnime.id);
   if(idx>=0){f.splice(idx,1);showToast('Odebráno z oblíbených');}else{f.unshift(state.currentAnime);showToast('Přidáno do oblíbených',true);}
   setFavs(f);updateFavBtn();
+  syncFavsToWorker();
 }
 function updateFavBtn(){
   if(!state.currentAnime)return;
@@ -3175,6 +3213,108 @@ async function initWatchPage(){
 }
 
 /* ══════════════════════════════════════════════════════════
+   PUSH NOTIFIKACE (Web Push + Service Worker)
+══════════════════════════════════════════════════════════ */
+const _VAPID_PUBLIC_KEY = 'BF7ZKQsAKWEn7jG413pG4YTjWtF0L_Ou9qxUK94rbhHowq17ASi3SNXG3qony-lRqtGMVEeAmZi_smVJvf5xb8Q';
+// Tuto hodnotu zkopíruj jako secret VAPID_PRIVATE_JWK do Cloudflare Worker
+const _VAPID_PRIVATE_JWK = '{"key_ops":["sign"],"ext":true,"kty":"EC","x":"XtkpCwApYSfuMbjXekbhhONa0XQv8672rFQr3ituEeg","y":"wq17ASi3SNXG3qony-lRqtGMVEeAmZi_smVJvf5xb8Q","crv":"P-256","d":"OXJDGcoM6oPsxtdfkjjtOXmVLkzl7FyaLPbqyuTZHGs"}';
+
+function getPushWorkerUrl(){return(getCfg().pushWorkerUrl||'').replace(/\/$/,'');}
+
+function _vapidKeyToUint8(b64url){
+  const b64=b64url.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(b64url.length/4)*4,'=');
+  const bin=atob(b64);return Uint8Array.from(bin,c=>c.charCodeAt(0));
+}
+
+async function _getPushRegistration(){
+  if(!('serviceWorker' in navigator)||!('PushManager' in window))return null;
+  try{return await navigator.serviceWorker.register('/sw.js');}catch{return null;}
+}
+
+async function registerPushNotifications(){
+  const pushUrl=getPushWorkerUrl();
+  if(!pushUrl)return;
+  const reg=await _getPushRegistration();
+  if(!reg)return;
+  await navigator.serviceWorker.ready;
+  const perm=await Notification.requestPermission();
+  if(perm!=='granted'){showToast('Notifikace zamítnuty prohlížečem');return;}
+  try{
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub){
+      sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_vapidKeyToUint8(_VAPID_PUBLIC_KEY)});
+      const{favIds,slugMap,favMeta}=_buildPushSyncData();
+      await fetch(pushUrl+'/push-subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:{endpoint:sub.endpoint,keys:{p256dh:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''),auth:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')}},favIds,slugMap,favMeta})});
+    }
+    showToast('Push notifikace zapnuty',true);
+    _updatePushBtn(true);
+  }catch(e){showToast('Chyba při registraci push: '+e.message);}
+}
+
+async function unregisterPushNotifications(){
+  const pushUrl=getPushWorkerUrl();
+  const reg=await _getPushRegistration();
+  if(!reg)return;
+  await navigator.serviceWorker.ready;
+  const sub=await reg.pushManager.getSubscription();
+  if(!sub)return;
+  if(pushUrl){try{await fetch(pushUrl+'/push-unsubscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endpoint:sub.endpoint})});}catch{}}
+  await sub.unsubscribe();
+  showToast('Push notifikace vypnuty');
+  _updatePushBtn(false);
+}
+
+function _buildPushSyncData(){
+  const favs=getFavs();
+  const favIds=favs.map(f=>f.id);
+  const slugMap={};
+  try{const s=JSON.parse(localStorage.getItem(_SVT_SERIES_KEY)||'{}');for(const[slug,e]of Object.entries(s))if(e.tmdbId)slugMap[slug]=e.tmdbId;}catch{}
+  try{const s=JSON.parse(localStorage.getItem(_SVT_FAV_CZ_KEY)||'{}');for(const[tid,e]of Object.entries(s))if(e.slug)slugMap[e.slug]=parseInt(tid);}catch{}
+  try{const s=_getSvtState();for(const[tid,e]of Object.entries(s))if(e.slug)slugMap[e.slug]=parseInt(tid);}catch{}
+  const svtSeries=_getSvtNewSeries();
+  const posterMap={};
+  for(const e of Object.values(svtSeries))if(e.tmdbId&&e.tmdbPoster)posterMap[e.tmdbId]=TMDB_IMG.replace('w500','w92')+e.tmdbPoster;
+  const favMeta={};
+  for(const f of favs)favMeta[f.id]={title:f.title||'',poster:posterMap[f.id]||''};
+  return{favIds,slugMap,favMeta};
+}
+
+async function syncFavsToWorker(){
+  const pushUrl=getPushWorkerUrl();
+  if(!pushUrl)return;
+  if(!('serviceWorker' in navigator))return;
+  try{
+    await navigator.serviceWorker.ready;
+    const reg=await navigator.serviceWorker.getRegistration('/sw.js');
+    if(!reg)return;
+    const sub=await reg.pushManager.getSubscription();
+    if(!sub)return;
+    const{favIds,slugMap,favMeta}=_buildPushSyncData();
+    fetch(pushUrl+'/push-sync-favs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endpoint:sub.endpoint,favIds,slugMap,favMeta})}).catch(()=>{});
+  }catch{}
+}
+
+function _updatePushBtn(enabled){
+  const btn=document.getElementById('pushToggleBtn');
+  if(!btn)return;
+  btn.textContent=enabled?'🔕 Vypnout push':'🔔 Zapnout push';
+  btn.onclick=enabled?unregisterPushNotifications:registerPushNotifications;
+}
+
+async function _initPushBtn(){
+  const btn=document.getElementById('pushToggleBtn');
+  if(!btn)return;
+  if(!('serviceWorker' in navigator)||!('PushManager' in window)){
+    btn.textContent='Push není podporováno';btn.disabled=true;return;
+  }
+  try{
+    const reg=await navigator.serviceWorker.getRegistration('/sw.js');
+    const sub=reg?await reg.pushManager.getSubscription():null;
+    _updatePushBtn(!!sub);
+  }catch{_updatePushBtn(false);}
+}
+
+/* ══════════════════════════════════════════════════════════
    INIT
 ══════════════════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', async () => {
@@ -3217,4 +3357,5 @@ Object.assign(window, {
   carouselNav, carouselGo,
   browseLoadMore,
   svtNewCardClick,
+  registerPushNotifications, unregisterPushNotifications,
 });
