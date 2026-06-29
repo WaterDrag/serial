@@ -3233,22 +3233,29 @@ async function _getPushRegistration(){
 
 async function registerPushNotifications(){
   const pushUrl=getPushWorkerUrl();
-  if(!pushUrl)return;
-  const reg=await _getPushRegistration();
-  if(!reg)return;
-  await navigator.serviceWorker.ready;
-  const perm=await Notification.requestPermission();
-  if(perm!=='granted'){showToast('Notifikace zamítnuty prohlížečem');return;}
+  if(!pushUrl){showToast('Nejdřív nastav Push Worker URL v nastavení ⚙️');return;}
+  if(!('serviceWorker' in navigator)||!('PushManager' in window)){showToast('Push notifikace nejsou v tomto prohlížeči podporovány');return;}
+  const btn=document.getElementById('pushToggleBtn');
+  if(btn){btn.textContent='⏳ Registruji…';btn.disabled=true;}
   try{
+    const reg=await _getPushRegistration();
+    if(!reg){showToast('Service Worker se nepodařilo registrovat — app musí běžet přes HTTPS nebo localhost');if(btn){btn.textContent='🔔 Zapnout push';btn.disabled=false;}return;}
+    await navigator.serviceWorker.ready;
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted'){showToast('Notifikace zamítnuty prohlížečem');if(btn){btn.textContent='🔔 Zapnout push';btn.disabled=false;}return;}
     let sub=await reg.pushManager.getSubscription();
     if(!sub){
       sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_vapidKeyToUint8(_VAPID_PUBLIC_KEY)});
-      const{favIds,slugMap,favMeta}=_buildPushSyncData();
-      await fetch(pushUrl+'/push-subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:{endpoint:sub.endpoint,keys:{p256dh:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''),auth:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')}},favIds,slugMap,favMeta})});
     }
-    showToast('Push notifikace zapnuty',true);
+    const{favIds,slugMap,favMeta}=_buildPushSyncData();
+    const res=await fetch(pushUrl+'/push-subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:{endpoint:sub.endpoint,keys:{p256dh:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''),auth:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')}},favIds,slugMap,favMeta})});
+    if(!res.ok)throw new Error('Worker odpověděl '+res.status);
+    showToast('Push notifikace zapnuty ✓',true);
     _updatePushBtn(true);
-  }catch(e){showToast('Chyba při registraci push: '+e.message);}
+  }catch(e){
+    showToast('Chyba: '+e.message);
+    if(btn){btn.textContent='🔔 Zapnout push';btn.disabled=false;}
+  }
 }
 
 async function unregisterPushNotifications(){
