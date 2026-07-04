@@ -419,7 +419,7 @@ function saveConfig(){
   const newPushUrl=(document.getElementById('cfgPushWorker')?.value||'').trim().replace(/\/$/,'');
   if(newPushUrl!==cfg.pushWorkerUrl&&!newPushUrl)unregisterPushNotifications().catch(()=>{});
   cfg.pushWorkerUrl=newPushUrl;
-  setCfg(cfg);closeConfig();showToast('Nastavení uloženo',true);saveSettingsToFirestore();
+  setCfg(cfg);closeConfig();showToast('Nastavení uloženo',true);saveSettingsToFirestore();syncFavsToWorker();
   if(cfg.tmdbKey)hideTmdbPrompt();
 }
 
@@ -1370,6 +1370,11 @@ function openNotifModal(){
     document.addEventListener('click',oc);
   },10);
   loadNotifDropdown();
+  // Čerstvá kontrola SVT feedu při otevření zvonečku (max 1× za 15 min)
+  const _lastScan=parseInt(localStorage.getItem(_SVT_SERIES_TS)||'0');
+  if(Date.now()-_lastScan>15*60*1000){
+    checkSvtNewSeriesBackground(true).then(()=>loadNotifDropdown()).catch(()=>{});
+  }
 }
 function _notifTimeAgo(ms){
   const m=Math.floor(ms/60000),h=Math.floor(ms/3600000),d=Math.floor(ms/86400000);
@@ -1843,6 +1848,7 @@ async function checkSvtNewSeriesBackground(force=false){
 
   const store=_getSvtNewSeries();
   const favIds=new Set(getFavs().map(f=>f.id));
+  const _prefs=getCfg().notifPrefs||{titulky:true,dabing:false};
   let changed=false;
   const re=/href="\/serial\/([a-z0-9-]+)\/(s(\d+)e(\d+))"/gi;
   let m;
@@ -1861,44 +1867,51 @@ async function checkSvtNewSeriesBackground(force=false){
     const hasDab=/episode-dub/.test(seg);
 
     if(store[slug]){
-      // Known series — check if this is a newer episode than last seen
+      // Known series — update if this is a newer episode than last seen
       const prev=store[slug].lastEpSeen||`${store[slug].season||1}_1`;
       const[ps,pe]=prev.split('_').map(Number);
-      const isNewer=season>ps||(season===ps&&episode>pe);
-      if(!isNewer)continue;
-      store[slug].season=season;store[slug].episode=episode;
-      store[slug].hasTit=hasTit;store[slug].hasDab=hasDab;
-      store[slug].lastEpSeen=`${season}_${episode}`;
-      // Notify if in favorites and TMDB ID known
-      if(store[slug].tmdbId&&favIds.has(store[slug].tmdbId)){
-        const lastN=store[slug].lastNotifiedEp||'0_0';
-        const[lnS,lnE]=lastN.split('_').map(Number);
-        if(season>lnS||(season===lnS&&episode>lnE)){
-          await _createSvtNotif({id:store[slug].tmdbId,title:store[slug].title},{slug,isDub:hasDab&&!hasTit},{s:season,e:episode});
-          store[slug].lastNotifiedEp=`${season}_${episode}`;
+      if(season>ps||(season===ps&&episode>pe)){
+        store[slug].season=season;store[slug].episode=episode;
+        store[slug].hasTit=hasTit;store[slug].hasDab=hasDab;
+        store[slug].lastEpSeen=`${season}_${episode}`;
+        changed=true;
+      }else if(season===ps&&episode===pe&&(store[slug].hasTit!==hasTit||store[slug].hasDab!==hasDab)){
+        // Stejná epizoda, ale přibyly titulky/dabing
+        store[slug].hasTit=hasTit;store[slug].hasDab=hasDab;
+        changed=true;
+      }
+    }else{
+      // New slug — record and look up TMDB ID
+      store[slug]={title,thumb,season,episode,firstSeen:Date.now(),hasTit,hasDab,lastEpSeen:`${season}_${episode}`};
+      try{
+        const slugTitle=slug.replace(/-/g,' ');
+        let res=await tmdbFetch('/search/tv',{query:title});
+        let results=res?.results||[];
+        if(!results.find(r=>r.original_language==='ja')&&title.toLowerCase()!==slugTitle){
+          const res2=await tmdbFetch('/search/tv',{query:slugTitle});
+          const r2=res2?.results||[];
+          if(r2.find(r=>r.original_language==='ja')||(!results.length&&r2.length))results=r2;
         }
-      }
+        const jaMatch=results.find(r=>r.original_language==='ja');
+        if(jaMatch){store[slug].tmdbId=jaMatch.id;store[slug].tmdbPoster=jaMatch.poster_path||null;store[slug].isAnime=true;}
+        else if(results.length>0){const best=results[0];store[slug].tmdbId=best.id;store[slug].tmdbPoster=best.poster_path||null;store[slug].isAnime=false;}
+        else{store[slug].tmdbPoster=null;}
+        store[slug].tmdbDone=true;
+      }catch{}
       changed=true;
-      continue;
     }
-    // New slug — record current episode as baseline, no notification on first scan
-    store[slug]={title,thumb,season,episode,firstSeen:Date.now(),hasTit,hasDab,lastEpSeen:`${season}_${episode}`};
-    try{
-      const slugTitle=slug.replace(/-/g,' ');
-      let res=await tmdbFetch('/search/tv',{query:title});
-      let results=res?.results||[];
-      if(!results.find(r=>r.original_language==='ja')&&title.toLowerCase()!==slugTitle){
-        const res2=await tmdbFetch('/search/tv',{query:slugTitle});
-        const r2=res2?.results||[];
-        if(r2.find(r=>r.original_language==='ja')||(!results.length&&r2.length))results=r2;
+    // Zvoneček: feed obsahuje jen nedávno přidané epizody — oznam epizodu
+    // oblíbeného seriálu, pokud má překlad podle preferencí (titulky/dabing)
+    const wantsThis=(hasTit&&_prefs.titulky!==false)||(hasDab&&!!_prefs.dabing);
+    if(wantsThis&&store[slug].tmdbId&&favIds.has(store[slug].tmdbId)){
+      const lastN=store[slug].lastNotifiedEp||'0_0';
+      const[lnS,lnE]=lastN.split('_').map(Number);
+      if(season>lnS||(season===lnS&&episode>lnE)){
+        await _createSvtNotif({id:store[slug].tmdbId,title:store[slug].title},{slug,isDub:hasDab},{s:season,e:episode});
+        store[slug].lastNotifiedEp=`${season}_${episode}`;
+        changed=true;
       }
-      const jaMatch=results.find(r=>r.original_language==='ja');
-      if(jaMatch){store[slug].tmdbId=jaMatch.id;store[slug].tmdbPoster=jaMatch.poster_path||null;store[slug].isAnime=true;}
-      else if(results.length>0){const best=results[0];store[slug].tmdbId=best.id;store[slug].tmdbPoster=best.poster_path||null;store[slug].isAnime=false;}
-      else{store[slug].tmdbPoster=null;}
-      store[slug].tmdbDone=true;
-    }catch{}
-    changed=true;
+    }
   }
   // Backfill: retry TMDB lookup for entries that previously failed
   for(const[slug,entry]of Object.entries(store)){
@@ -3247,8 +3260,8 @@ async function registerPushNotifications(){
     if(!sub){
       sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_vapidKeyToUint8(_VAPID_PUBLIC_KEY)});
     }
-    const{favIds,slugMap,favMeta,appBase}=_buildPushSyncData();
-    const res=await fetch(pushUrl+'/push-subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:{endpoint:sub.endpoint,keys:{p256dh:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''),auth:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')}},favIds,slugMap,favMeta,appBase})});
+    const{favIds,slugMap,favMeta,appBase,notifPrefs}=_buildPushSyncData();
+    const res=await fetch(pushUrl+'/push-subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subscription:{endpoint:sub.endpoint,keys:{p256dh:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''),auth:btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')}},favIds,slugMap,favMeta,appBase,notifPrefs})});
     if(!res.ok)throw new Error('Worker odpověděl '+res.status);
     showToast('Push notifikace zapnuty ✓',true);
     _updatePushBtn(true);
@@ -3284,7 +3297,8 @@ function _buildPushSyncData(){
   const favMeta={};
   for(const f of favs)favMeta[f.id]={title:f.title||'',poster:posterMap[f.id]||''};
   const appBase=location.origin+location.pathname.replace(/\/[^/]*$/,'/');
-  return{favIds,slugMap,favMeta,appBase};
+  const notifPrefs=getCfg().notifPrefs||{titulky:true,dabing:false};
+  return{favIds,slugMap,favMeta,appBase,notifPrefs};
 }
 
 async function syncFavsToWorker(){
@@ -3297,8 +3311,8 @@ async function syncFavsToWorker(){
     if(!reg)return;
     const sub=await reg.pushManager.getSubscription();
     if(!sub)return;
-    const{favIds,slugMap,favMeta,appBase}=_buildPushSyncData();
-    fetch(pushUrl+'/push-sync-favs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endpoint:sub.endpoint,favIds,slugMap,favMeta})}).catch(()=>{});
+    const{favIds,slugMap,favMeta,appBase,notifPrefs}=_buildPushSyncData();
+    fetch(pushUrl+'/push-sync-favs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endpoint:sub.endpoint,favIds,slugMap,favMeta,appBase,notifPrefs})}).catch(()=>{});
   }catch{}
 }
 

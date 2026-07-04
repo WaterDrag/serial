@@ -119,9 +119,9 @@ async function listSubs(kv) {
   const idx = await kv.get(KV_SUBS_INDEX, { type:'json' }) || [];
   return (await Promise.all(idx.map(h => kv.get('sub:'+h, { type:'json' })))).filter(Boolean);
 }
-async function saveSub(kv, ep, keys, favIds, slugMap, favMeta, appBase) {
+async function saveSub(kv, ep, keys, favIds, slugMap, favMeta, appBase, notifPrefs) {
   const h = await epHash(ep);
-  await kv.put('sub:'+h, JSON.stringify({ endpoint:ep, keys, favIds, slugMap, favMeta, appBase:appBase||'', ts:Date.now() }));
+  await kv.put('sub:'+h, JSON.stringify({ endpoint:ep, keys, favIds, slugMap, favMeta, appBase:appBase||'', notifPrefs:notifPrefs||{titulky:true,dabing:false}, ts:Date.now() }));
   const idx = await kv.get(KV_SUBS_INDEX, { type:'json' }) || [];
   if (!idx.includes(h)) { idx.push(h); await kv.put(KV_SUBS_INDEX, JSON.stringify(idx)); }
 }
@@ -149,8 +149,8 @@ function ok(body = 'OK') { return new Response(body, { headers: { ...CORS, 'Cont
 /* ── Fetch handlers ─────────────────────────────────────── */
 
 async function handleSubscribe(req, env) {
-  const { subscription, favIds, slugMap, favMeta, appBase } = await req.json();
-  await saveSub(env.PUSH_KV, subscription.endpoint, subscription.keys, favIds||[], slugMap||{}, favMeta||{}, appBase||'');
+  const { subscription, favIds, slugMap, favMeta, appBase, notifPrefs } = await req.json();
+  await saveSub(env.PUSH_KV, subscription.endpoint, subscription.keys, favIds||[], slugMap||{}, favMeta||{}, appBase||'', notifPrefs);
   return ok();
 }
 async function handleUnsubscribe(req, env) {
@@ -159,8 +159,11 @@ async function handleUnsubscribe(req, env) {
   return ok();
 }
 async function handleSyncFavs(req, env) {
-  const { endpoint, favIds, slugMap, favMeta } = await req.json();
-  await updateSub(env.PUSH_KV, endpoint, { favIds: favIds||[], slugMap: slugMap||{}, favMeta: favMeta||{} });
+  const { endpoint, favIds, slugMap, favMeta, appBase, notifPrefs } = await req.json();
+  const upd = { favIds: favIds||[], slugMap: slugMap||{}, favMeta: favMeta||{} };
+  if (appBase) upd.appBase = appBase;
+  if (notifPrefs) upd.notifPrefs = notifPrefs;
+  await updateSub(env.PUSH_KV, endpoint, upd);
   return ok();
 }
 
@@ -199,24 +202,21 @@ async function runCron(env) {
     if (seenSlug.has(slug)) continue;
     seenSlug.add(slug);
 
-    const prev    = state[slug]?.lastEp || '0_0';
-    const [ps,pe] = prev.split('_').map(Number);
-    if (season < ps || (season === ps && ep <= pe)) continue;
-
-    const lastN   = state[slug]?.lastNotif || '0_0';
-    const [ns,ne] = lastN.split('_').map(Number);
-
     const segStart = Math.max(0, m.index - 100);
     const segEnd   = Math.min(html.length, m.index + 900);
     const seg      = html.slice(segStart, segEnd);
     const hasTit   = /episode-cc/.test(seg);
     const hasDab   = /episode-dub/.test(seg);
 
-    state[slug] = { ...(state[slug] || {}), lastEp: `${season}_${ep}` };
+    // Per-epizoda sledování oznámených jazyků — titulky mohou přibýt
+    // až několik dní po vydání epizody, pak se oznámí dodatečně
+    const epKey    = `${season}_${ep}`;
+    const notified = (state[slug] && state[slug].notifLangs && state[slug].notifLangs[epKey]) || { tit:false, dab:false };
+    const newTit   = hasTit && !notified.tit;
+    const newDab   = hasDab && !notified.dab;
 
-    if (season > ns || (season === ns && ep > ne)) {
-      newEps.push({ slug, season, ep, hasTit, hasDab });
-    }
+    state[slug] = { ...(state[slug] || {}), lastEp: epKey };
+    if (newTit || newDab) newEps.push({ slug, season, ep, epKey, hasTit, hasDab, newTit, newDab });
   }
 
   if (!newEps.length) {
@@ -231,10 +231,14 @@ async function runCron(env) {
     const favSet  = new Set(sub.favIds || []);
     const slugMap = sub.slugMap || {};
     const favMeta = sub.favMeta || {};
+    const prefs   = sub.notifPrefs || { titulky:true, dabing:false };
 
     for (const epInfo of newEps) {
       const tmdbId = slugMap[epInfo.slug];
       if (!tmdbId || !favSet.has(tmdbId)) continue;
+      // Filtruj podle jazykových preferencí — jen NOVĚ přidané titulky/dabing
+      const wants = (epInfo.newTit && prefs.titulky !== false) || (epInfo.newDab && !!prefs.dabing);
+      if (!wants) continue;
 
       const meta   = favMeta[String(tmdbId)] || favMeta[tmdbId] || {};
       const s      = String(epInfo.season).padStart(2, '0');
@@ -253,7 +257,9 @@ async function runCron(env) {
       try {
         const status = await sendPush(sub, payload, jwkStr);
         if (status === 201 || status === 200 || status === 202) {
-          state[epInfo.slug] = { ...(state[epInfo.slug] || {}), lastNotif:`${epInfo.season}_${epInfo.ep}` };
+          // Označ jazyky jako oznámené (jen aktuální epizoda — omezuje velikost KV)
+          const prevL = (state[epInfo.slug].notifLangs || {})[epInfo.epKey] || { tit:false, dab:false };
+          state[epInfo.slug].notifLangs = { [epInfo.epKey]: { tit: prevL.tit || epInfo.hasTit, dab: prevL.dab || epInfo.hasDab } };
         } else if (status === 410 || status === 404) {
           await deleteSub(env.PUSH_KV, sub.endpoint); // vypršela platnost předplatného
         }
