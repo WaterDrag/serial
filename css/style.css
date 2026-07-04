@@ -329,6 +329,8 @@ input,select,textarea{font-family:inherit;outline:none}
 .notif-dd-item{display:flex;align-items:center;gap:12px;padding:11px 16px;cursor:pointer;transition:background .12s;border-bottom:1px solid var(--border);}
 .notif-dd-item:last-child{border-bottom:none;}
 .notif-dd-item:hover{background:var(--surface);}
+.notif-dd-item.read{opacity:.4;}
+.notif-dd-item.read:hover{opacity:.65;}
 .notif-dd-thumb{width:34px;height:48px;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--surface);}
 .notif-dd-info{flex:1;min-width:0;}
 .notif-dd-title{color:var(--text-1);font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}

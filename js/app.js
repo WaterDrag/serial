@@ -1396,15 +1396,16 @@ function loadNotifDropdown(){
   const body=document.getElementById('notifDropdownBody');if(!body)return;
   const now=Date.now();
   const thirtyDays=30*24*3600*1000;
-  const allNotifs=_getSvtNotifs().filter(n=>now-n.ts<thirtyDays);
+  const raw=_getSvtNotifs();
+  const allNotifs=raw.filter(n=>now-n.ts<thirtyDays);
+  if(allNotifs.length!==raw.length)_saveSvtNotifs(allNotifs); // promaž starší 30 dnů
   const unread=allNotifs.filter(n=>!n.read);
   _updateNotifBadge(unread.length);
-  if(!unread.length){
-    const msg=allNotifs.length?'Vše přečteno ✓':'Žádné nové CZ epizody z oblíbených';
-    body.innerHTML=`<div style="text-align:center;padding:20px;color:var(--text-3);font-size:13px;">${msg}</div>`;
+  if(!allNotifs.length){
+    body.innerHTML=`<div style="text-align:center;padding:20px;color:var(--text-3);font-size:13px;">Žádné nové CZ epizody z oblíbených</div>`;
     return;
   }
-  body.innerHTML=unread.sort((a,b)=>b.ts-a.ts).map(n=>{
+  body.innerHTML=allNotifs.sort((a,b)=>b.ts-a.ts).map(n=>{
     const s=String(n.season).padStart(2,'0'),e=String(n.episode).padStart(2,'0');
     const epCode=`S${s} E${e}`;
     const timeAgo=_notifTimeAgo(now-n.ts);
@@ -1413,7 +1414,7 @@ function loadNotifDropdown(){
       :'<span class="ep-lang-btn tit" style="font-size:9px;padding:2px 6px;pointer-events:none;">TIT</span>';
     const cover=n.showPoster?TMDB_IMG+n.showPoster:'';
     const desc=n.isDub?'Přidané titulky a dabing':'Přidané CZ titulky';
-    return `<div class="notif-dd-item" onclick="_markSvtNotifRead('${n.key}');document.getElementById('notifDropdown')?.remove();window.location.href='watch.html?id=${n.showId}&ep=${n.episode}&season=${n.season}'">
+    return `<div class="notif-dd-item${n.read?' read':''}" onclick="_markSvtNotifRead('${n.key}');document.getElementById('notifDropdown')?.remove();window.location.href='watch.html?id=${n.showId}&ep=${n.episode}&season=${n.season}'">
       <img src="${cover}" class="notif-dd-thumb">
       <div class="notif-dd-info">
         <div class="notif-dd-title">${n.showName}</div>
