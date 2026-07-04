@@ -1752,9 +1752,13 @@ async function loadFilter(filter,append=false){
     document.getElementById('animeGrid').innerHTML=`<div style="grid-column:1/-1;text-align:center;color:var(--danger)">Chyba: ${e.message}</div>`;
   }
 }
+function _saveHomeFilters(){
+  localStorage.setItem('ws_home_filters',JSON.stringify({filter:state.filter,animeMode:state.animeMode,svtOnly:state.svtOnly}));
+}
 function switchFilter(btn,filter){
   document.querySelectorAll('#mainFilterRow .filter-tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');state.filter=filter;state.page=1;
+  _saveHomeFilters();
   const svtLabel=document.getElementById('svtOnlyLabel');
   if(svtLabel)svtLabel.style.display=filter==='SVT_NEW'?'flex':'none';
   if(filter==='SVT_NEW')loadSvtNewEpisodes();else loadFilter(filter);
@@ -1762,6 +1766,7 @@ function switchFilter(btn,filter){
 function switchAnimeFilter(btn,mode){
   document.querySelectorAll('#animeModeRow .filter-tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');state.animeMode=mode;state.page=1;
+  _saveHomeFilters();
   if(state.filter==='SVT_NEW')loadSvtNewEpisodes();else loadFilter(state.filter);
 }
 function loadMore(){state.page++;loadFilter(state.filter,true);}
@@ -2057,6 +2062,7 @@ async function loadSvtNewEpisodes(){
 
 function toggleSvtOnly(cb){
   state.svtOnly=cb.checked;
+  _saveHomeFilters();
   if(state.filter==='SVT_NEW')loadSvtNewEpisodes();
 }
 
@@ -2133,7 +2139,23 @@ function initHomePage(){
     const inp=document.getElementById('searchInput');
     if(inp){inp.value=urlQ;inp.dispatchEvent(new Event('input'));inp.focus();}
   }else{
-    loadFilter('TRENDING');
+    // Obnov uložené filtry z localStorage
+    let saved=null;
+    try{saved=JSON.parse(localStorage.getItem('ws_home_filters')||'null');}catch{}
+    if(saved){
+      if(saved.filter)state.filter=saved.filter;
+      if(saved.animeMode)state.animeMode=saved.animeMode;
+      if(typeof saved.svtOnly==='boolean')state.svtOnly=saved.svtOnly;
+    }
+    const fBtn=document.querySelector(`#mainFilterRow .filter-tab[onclick*=",'${state.filter}')"]`);
+    if(fBtn){document.querySelectorAll('#mainFilterRow .filter-tab').forEach(b=>b.classList.remove('active'));fBtn.classList.add('active');}
+    const mBtn=document.querySelector(`#animeModeRow .filter-tab[onclick*=",'${state.animeMode}')"]`);
+    if(mBtn){document.querySelectorAll('#animeModeRow .filter-tab').forEach(b=>b.classList.remove('active'));mBtn.classList.add('active');}
+    const svtCb=document.getElementById('svtOnlyToggle');
+    if(svtCb)svtCb.checked=state.svtOnly;
+    const svtLabel=document.getElementById('svtOnlyLabel');
+    if(svtLabel)svtLabel.style.display=state.filter==='SVT_NEW'?'flex':'none';
+    if(state.filter==='SVT_NEW')loadSvtNewEpisodes();else loadFilter(state.filter);
     initHomeNotifications();
     initNotifBadge();
     checkSvtNotificationsBackground();
