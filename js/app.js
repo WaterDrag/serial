@@ -1324,6 +1324,14 @@ function initSearch(){
   const inp=document.getElementById('searchInput');
   const res=document.getElementById('searchResults');
   if(!inp||!res)return;
+  // Chrome autofill sem předvyplňuje uloženou proxy URL — vyčisti, pokud nejde o ?q
+  inp.setAttribute('name','ws-search-nofill');
+  const _clearAutofill=()=>{
+    if(inp.value&&!new URLSearchParams(location.search).get('q')&&inp.value.startsWith('http'))inp.value='';
+  };
+  _clearAutofill();
+  setTimeout(_clearAutofill,150);
+  setTimeout(_clearAutofill,600);
   let searchTO;
   inp.addEventListener('input',function(){
     clearTimeout(searchTO);
