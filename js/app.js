@@ -641,16 +641,17 @@ async function svtEpisodes(slug,season,tvShowId){
     const epNum=parseInt(m[1].match(/e(\d+)/)[1]);
     const segEnd=epMatches[i+1]?.index??epHtml.length;
     const seg=epHtml.slice(m.index,segEnd).toLowerCase();
-    // SVT uses "TIT"/"DAB" badge text (not full word "titulky") in episode list HTML
-    const hasDub=/dabing|\bdab\b/.test(seg);
-    const hasTit=/titulky|\btit\b/.test(seg);
+    // SVT uses "TIT"/"DAB" badge text + episode-cc/episode-dub CSS classes
+    const hasDub=/episode-dub|dabing|\bdab\b/.test(seg);
+    const hasTit=/episode-cc|titulky|\btit\b/.test(seg);
     const hasCz=hasDub||hasTit;
     return{number:epNum,title:(nameMatches[i]?nameMatches[i][1].trim():null)||`Epizoda ${epNum}`,code:m[1],slug,season,hasCz,isDubEp:hasDub&&!hasTit};
   });
-  // If detection gave a mixed result (some have CZ, some don't) → reliable, use it
   const czCount=eps.filter(e=>e.hasCz).length;
-  if(czCount>0&&czCount<eps.length)return eps;
-  // All same (all true or all false) → text detection unreliable → reset hasCz to undefined (show-level fallback)
+  // Žádná epizoda nemá CZ → věř detekci, badge se nezobrazí (EN-only epizody na SVT)
+  // Mixed výsledek → spolehlivé, použij
+  if(czCount<eps.length)return eps;
+  // Všechny mají CZ → může být falešně pozitivní (slova v okolním layoutu) → show-level fallback
   eps.forEach(e=>{e.hasCz=undefined;});
   return eps;
 }
