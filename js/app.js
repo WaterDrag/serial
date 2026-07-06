@@ -92,7 +92,7 @@ function renderAuthUI(user) {
         <div class="profile-menu">
           <a class="profile-menu-item" href="search.html">🔍 Hledat</a>
           <a class="profile-menu-item" href="history.html">❤️ Oblíbené</a>
-          <a class="profile-menu-item" href="history.html">📋 Historie</a>
+          <a class="profile-menu-item" href="history.html#history">📋 Historie</a>
           <div style="height:1px;background:var(--border);margin:4px 0;"></div>
           <a class="profile-menu-item" onclick="openConfig();toggleProfileDropdown()">⚙️ Nastavení</a>
           <div style="height:1px;background:var(--border);margin:4px 0;"></div>
@@ -1682,6 +1682,7 @@ function renderHistoryContent(){
 function initHistoryPage(){
   initSearch();
   showHistoryTab(location.hash==='#history'?'history':'favs');
+  window.addEventListener('hashchange',()=>showHistoryTab(location.hash==='#history'?'history':'favs'));
   document.getElementById('historySortSelect')?.addEventListener('change',renderHistoryContent);
   document.querySelectorAll('.filter-chip').forEach(btn=>{
     btn.addEventListener('click',function(){
@@ -1954,6 +1955,99 @@ async function initHomeNotifications(){
     const hasRecent=_homeNotifCache.some(s=>{const ep=s.last_episode_to_air;return ep?.air_date&&now-new Date(ep.air_date).getTime()<=cutoff;});
     renderHomeNotifs(hasRecent?'recent':'upcoming');
   }catch(e){console.warn('[HomeNotif]',e.message);}
+}
+
+/* ══ POKRAČOVAT VE SLEDOVÁNÍ — 5 posledních z historie, statické ════════ */
+function _lastWatchedEp(animeId){
+  const w=getWatched();
+  let maxS=0,maxE=0;
+  for(const[k,eps]of Object.entries(w)){
+    const m=k.match(new RegExp(`^${animeId}_s(\\d+)$`));
+    if(!m)continue;
+    const sNum=parseInt(m[1]);
+    const nums=Object.keys(eps).map(Number).filter(n=>eps[n]);
+    if(!nums.length)continue;
+    if(sNum>maxS){maxS=sNum;maxE=Math.max(...nums);}
+    else if(sNum===maxS)maxE=Math.max(maxE,...nums);
+  }
+  return maxS?{season:maxS,ep:maxE}:null;
+}
+async function initHomeContinue(){
+  const section=document.getElementById('homeContinueSection');
+  const row=document.getElementById('homeContinueRow');
+  if(!section||!row)return;
+  const hist=getHistory().slice(0,10);
+  if(!hist.length)return;
+  const cards=[];
+  for(const h of hist){
+    if(cards.length>=5)break;
+    try{
+      const last=_lastWatchedEp(h.id);
+      const show=await tmdbFetch(`/tv/${h.id}`);
+      const lastAir=show.last_episode_to_air;
+      let next;
+      if(!last){
+        next={season:1,ep:1};
+      }else{
+        const seasonInfo=(show.seasons||[]).find(s=>s.season_number===last.season);
+        const epCount=seasonInfo?.episode_count||0;
+        if(epCount&&last.ep<epCount)next={season:last.season,ep:last.ep+1};
+        else if((show.seasons||[]).some(s=>s.season_number===last.season+1))next={season:last.season+1,ep:1};
+        else continue; // vše zhlédnuto, žádná další sezóna
+      }
+      // Další epizoda musí být už odvysílaná
+      if(lastAir&&(next.season>lastAir.season_number||(next.season===lastAir.season_number&&next.ep>lastAir.episode_number)))continue;
+      cards.push({id:h.id,title:h.title||show.name,cover:h.cover||(show.poster_path?TMDB_IMG+show.poster_path:''),next});
+    }catch{}
+  }
+  if(!cards.length)return;
+  section.style.display='block';
+  row.innerHTML=cards.map(c=>`<div class="new-ep-card" onclick="window.location.href='watch.html?id=${c.id}&ep=${c.next.ep}&season=${c.next.season}'" style="cursor:pointer;">
+    <div class="new-ep-thumb">
+      <img src="${c.cover}" loading="lazy">
+      <div class="new-ep-badge">S${String(c.next.season).padStart(2,'0')} E${String(c.next.ep).padStart(2,'0')}</div>
+    </div>
+    <div class="new-ep-title">${c.title}</div>
+    <div class="new-ep-date">Pokračovat</div>
+  </div>`).join('');
+}
+
+/* ══ TRAILER (TMDB videos → YouTube embed) ══════════════════════════════ */
+async function loadTrailerBtn(animeId){
+  const actions=document.querySelector('.detail-actions');
+  if(!actions||document.getElementById('trailerBtn'))return;
+  try{
+    const data=await tmdbFetch(`/tv/${animeId}/videos`);
+    const vids=data?.results||[];
+    const trailer=vids.find(v=>v.site==='YouTube'&&v.type==='Trailer')||vids.find(v=>v.site==='YouTube'&&v.type==='Teaser');
+    if(!trailer)return;
+    const btn=document.createElement('button');
+    btn.className='btn-outline';btn.id='trailerBtn';
+    btn.innerHTML='<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M21.58 7.19a2.5 2.5 0 0 0-1.76-1.77C18.25 5 12 5 12 5s-6.25 0-7.82.42a2.5 2.5 0 0 0-1.76 1.77A26 26 0 0 0 2 12a26 26 0 0 0 .42 4.81 2.5 2.5 0 0 0 1.76 1.77C5.75 19 12 19 12 19s6.25 0 7.82-.42a2.5 2.5 0 0 0 1.76-1.77A26 26 0 0 0 22 12a26 26 0 0 0-.42-4.81z"/><polygon points="9.75 15.02 15.5 12 9.75 8.98" fill="var(--bg)"/></svg> Trailer';
+    btn.onclick=()=>openTrailer(trailer.key);
+    actions.appendChild(btn);
+  }catch{}
+}
+function openTrailer(ytKey){
+  const ov=document.createElement('div');
+  ov.id='trailerOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:3000;display:flex;align-items:center;justify-content:center;padding:4vw;';
+  ov.innerHTML=`<button style="position:absolute;top:18px;right:24px;background:none;border:none;color:#fff;font-size:28px;cursor:pointer;line-height:1;">✕</button>
+    <div style="width:100%;max-width:1100px;aspect-ratio:16/9;">
+      <iframe src="https://www.youtube.com/embed/${ytKey}?autoplay=1" allow="autoplay; fullscreen; encrypted-media" allowfullscreen style="width:100%;height:100%;border:none;border-radius:12px;background:#000;"></iframe>
+    </div>`;
+  ov.onclick=e=>{if(e.target===ov||e.target.tagName==='BUTTON')ov.remove();};
+  document.addEventListener('keydown',function esc(e){if(e.key==='Escape'){ov.remove();document.removeEventListener('keydown',esc);}});
+  document.body.appendChild(ov);
+}
+
+/* ══ NÁHODNÝ VÝBĚR Z OBLÍBENÝCH ═════════════════════════════════════════ */
+function randomFav(){
+  const favs=getFavs();
+  if(!favs.length){showToast('Nemáš žádné oblíbené seriály');return;}
+  const pick=favs[Math.floor(Math.random()*favs.length)];
+  showToast(`🎲 ${pick.title}`,true);
+  setTimeout(()=>goToAnime(pick.id),600);
 }
 
 /* ══ SVT NOVINKY — nově přidané série (store + 21denní okno) ════════════ */
@@ -2276,6 +2370,7 @@ function initHomePage(){
     const svtLabel=document.getElementById('svtOnlyLabel');
     if(svtLabel)svtLabel.style.display=state.filter==='SVT_NEW'?'flex':'none';
     if(state.filter==='SVT_NEW')loadSvtNewEpisodes();else loadFilter(state.filter);
+    initHomeContinue().catch(()=>{});
     initHomeNotifications();
     initNotifBadge();
     checkSvtNotificationsBackground();
@@ -2878,6 +2973,7 @@ async function initAnimePage(){
   function setMsg(msg){if(epList)epList.innerHTML=`<li style="padding:20px;text-align:center;color:var(--text-3);display:flex;align-items:center;justify-content:center;gap:10px;"><div class="spinner" style="width:20px;height:20px;border-width:2px;"></div> ${msg}</li>`;}
   setMsg('Načítám anime…');
   loadSimilar(animeId).catch(()=>{});
+  loadTrailerBtn(animeId).catch(()=>{});
 
   let anime;
   try{anime=await fetchAnimeDetail(animeId);}
@@ -3591,5 +3687,5 @@ Object.assign(window, {
   browseLoadMore,
   svtNewCardClick,
   registerPushNotifications, unregisterPushNotifications,
-  moveSrcOrder, expandEpList,
+  moveSrcOrder, expandEpList, randomFav,
 });

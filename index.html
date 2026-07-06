@@ -35,6 +35,7 @@
   <div class="section-label">
     <div class="dot"></div>
     <h2 id="sectionTitle">Výběr</h2>
+    <button onclick="randomFav()" title="Náhodný výběr z oblíbených" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text-2);border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-2)'">🎲 Co sledovat</button>
   </div>
 
   <div class="filter-tabs" id="mainFilterRow">
@@ -52,6 +53,15 @@
       <input type="checkbox" id="svtOnlyToggle" checked onchange="toggleSvtOnly(this)" style="accent-color:var(--accent);width:15px;height:15px;">
       Jen SVT
     </label>
+  </div>
+
+  <!-- Pokračovat ve sledování -->
+  <div id="homeContinueSection" style="display:none;margin-bottom:2.5rem;">
+    <div class="section-label" style="margin-bottom:10px;">
+      <div class="dot"></div>
+      <h2>Pokračovat ve sledování</h2>
+    </div>
+    <div class="new-eps-row" id="homeContinueRow"></div>
   </div>
 
   <!-- Nové epizody z oblíbených -->
