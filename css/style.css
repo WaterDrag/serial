@@ -335,6 +335,16 @@ input,select,textarea{font-family:inherit;outline:none}
 .notif-dd-item.read{opacity:.4;}
 .notif-dd-item.read:hover{opacity:.65;}
 
+/* ── Spodní mobilní navigace ── */
+.mobile-nav{display:none;}
+@media(max-width:768px){
+  .mobile-nav{display:flex;position:fixed;bottom:0;left:0;right:0;z-index:900;background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--border);justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom));}
+  .mobile-nav a{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--text-3);font-size:10px;font-weight:700;padding:4px 14px;border-radius:12px;text-decoration:none;transition:color .15s;}
+  .mobile-nav a.active{color:var(--accent);}
+  .mobile-nav .mn-ico{font-size:19px;line-height:1;}
+  .main{padding-bottom:86px;}
+}
+
 /* ── Kalendář vydávání ── */
 .cal-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r-xl);padding:18px;}
 .cal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px;}

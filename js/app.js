@@ -379,6 +379,21 @@ function openConfig(){
       if(saveBtn)modal.insertBefore(ps,saveBtn);else modal.appendChild(ps);
       _initPushBtn();
     }
+    if(!document.getElementById('anilistSection')){
+      const saveBtn=modal.querySelector('.btn-save');
+      const as=document.createElement('div');
+      as.className='config-section';as.id='anilistSection';
+      as.innerHTML=`<div class="config-section-title">📥 Import z AniList</div>
+        <div class="config-field">
+          <label class="config-label">AniList uživatelské jméno</label>
+          <div style="display:flex;gap:8px;">
+            <input class="config-input" id="cfgAnilistUser" placeholder="např. Vodnidrak" style="flex:1;">
+            <button class="btn-outline" onclick="importFromAniList()" style="font-size:12px;padding:8px 16px;flex-shrink:0;">Importovat</button>
+          </div>
+          <div class="config-hint" id="anilistStatus">Přidá anime ze všech tvých AniList seznamů do oblíbených (kromě zahozených). Zhlédnuté epizody se nepřenáší.</div>
+        </div>`;
+      if(saveBtn)modal.insertBefore(as,saveBtn);else modal.appendChild(as);
+    }
     if(!document.getElementById('backupSection')){
       const saveBtn=modal.querySelector('.btn-save');
       const bs=document.createElement('div');
@@ -455,6 +470,66 @@ function importUserData(){
     }catch(e){showToast('Import selhal: '+e.message);}
   };
   inp.click();
+}
+
+/* ── Import z AniList ── */
+async function importFromAniList(){
+  const user=(document.getElementById('cfgAnilistUser')?.value||'').trim();
+  if(!user){showToast('Zadej AniList uživatelské jméno');return;}
+  const st=document.getElementById('anilistStatus');
+  const say=t=>{if(st)st.textContent=t;};
+  say('Načítám seznamy z AniList…');
+  try{
+    const res=await fetch('https://graphql.anilist.co',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        query:`query($name:String){MediaListCollection(userName:$name,type:ANIME){lists{entries{status media{title{romaji english}seasonYear coverImage{large}}}}}}`,
+        variables:{name:user},
+      }),
+    });
+    const data=await res.json();
+    if(data.errors)throw new Error(data.errors[0]?.message||'AniList chyba');
+    const entries=[];
+    for(const l of data.data?.MediaListCollection?.lists||[])
+      for(const e of l.entries||[])
+        if(e.status!=='DROPPED')entries.push(e);
+    if(!entries.length){say('Na účtu nebyla nalezena žádná anime.');return;}
+    say(`Nalezeno ${entries.length} anime, páruji s TMDB…`);
+    const favs=getFavs();
+    let added=0,failed=0,done=0;
+    for(const e of entries){
+      done++;
+      const title=e.media?.title?.english||e.media?.title?.romaji;
+      if(!title){failed++;continue;}
+      try{
+        const r=await tmdbFetch('/search/tv',{query:title});
+        const results=r?.results||[];
+        const m=results.find(x=>x.original_language==='ja')||results[0];
+        if(!m){failed++;continue;}
+        if(!favs.some(f=>f.id===m.id)){
+          favs.unshift({
+            id:m.id,
+            title:m.name,
+            cover:m.poster_path?TMDB_IMG+m.poster_path:(e.media?.coverImage?.large||''),
+            score:m.vote_average?Math.round(m.vote_average*10):null,
+            year:parseInt((m.first_air_date||'').slice(0,4))||e.media?.seasonYear||null,
+            genres:[],
+          });
+          added++;
+        }
+      }catch{failed++;}
+      if(done%10===0)say(`Zpracováno ${done}/${entries.length}… (${added} přidáno)`);
+      await new Promise(r2=>setTimeout(r2,120));
+    }
+    setFavs(favs);
+    syncFavsToWorker();
+    say(`Hotovo: ${added} přidáno do oblíbených, ${failed} se nepodařilo najít na TMDB.`);
+    showToast(`AniList import: ${added} přidáno ✓`,true);
+  }catch(err){
+    say('Chyba: '+err.message);
+    showToast('Import selhal: '+err.message);
+  }
 }
 
 let _cfgSrcOrder=null;
@@ -534,7 +609,7 @@ const state={
   modes:{svt:false,animegg:false},
   animeggSlug:null,animeggEpisodes:[],animeggHasDub:false,animeggIsDub:false,
   svtSources:[],svtSourceIndex:0,
-  page:1,filter:'TRENDING',animeMode:'anime',svtOnly:true,
+  page:1,filter:'TRENDING',animeMode:'anime',svtOnly:true,genre:'',
   hlsInstance:null,
 };
 
@@ -632,6 +707,7 @@ async function fetchList(sortKey,page=1,extra=''){
   if(state.animeMode==='anime'){params.with_genres='16';params.with_original_language='ja';}
   else if(state.animeMode==='no-anime'){params.without_genres='16';}
   // 'all' — no genre/language restriction
+  if(state.genre)params.with_genres=params.with_genres?`${params.with_genres},${state.genre}`:state.genre;
   if(sortKey==='TRENDING_DESC'){
     // "Trending" = highly popular anime aired in the last 90 days
     const d=new Date();d.setDate(d.getDate()-90);
@@ -1458,6 +1534,23 @@ function initSearch(){
 function goToAnime(id){clearTimeout(toastTO);window.location.href=`anime.html?id=${id}`;}
 function goHome(){clearTimeout(toastTO);window.location.href='index.html';}
 
+/* Spodní navigace na mobilu (vkládá se na všechny stránky) */
+function initMobileNav(){
+  if(document.querySelector('.mobile-nav'))return;
+  const page=document.body.dataset.page;
+  const items=[
+    ['index.html','🏠','Domů','home'],
+    ['search.html','🔍','Hledat','search'],
+    ['history.html','❤️','Oblíbené','history'],
+    ['kalendar.html','📅','Kalendář','calendar'],
+  ];
+  const nav=document.createElement('nav');
+  nav.className='mobile-nav';
+  nav.innerHTML=items.map(([href,ico,label,p])=>
+    `<a href="${href}" class="${p===page?'active':''}"><span class="mn-ico">${ico}</span>${label}</a>`).join('');
+  document.body.appendChild(nav);
+}
+
 /* ══════════════════════════════════════════════════════════
    NOTIFIKACE
 ══════════════════════════════════════════════════════════ */
@@ -1948,7 +2041,13 @@ async function loadFilter(filter,append=false){
   }
 }
 function _saveHomeFilters(){
-  localStorage.setItem('ws_home_filters',JSON.stringify({filter:state.filter,animeMode:state.animeMode,svtOnly:state.svtOnly}));
+  localStorage.setItem('ws_home_filters',JSON.stringify({filter:state.filter,animeMode:state.animeMode,svtOnly:state.svtOnly,genre:state.genre}));
+}
+function switchGenre(btn,genre){
+  document.querySelectorAll('#genreRow .filter-chip').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');state.genre=genre;state.page=1;
+  _saveHomeFilters();
+  if(state.filter==='SVT_NEW')loadSvtNewEpisodes();else loadFilter(state.filter);
 }
 function switchFilter(btn,filter){
   document.querySelectorAll('#mainFilterRow .filter-tab').forEach(b=>b.classList.remove('active'));
@@ -2560,7 +2659,10 @@ function initHomePage(){
       if(saved.filter)state.filter=saved.filter;
       if(saved.animeMode)state.animeMode=saved.animeMode;
       if(typeof saved.svtOnly==='boolean')state.svtOnly=saved.svtOnly;
+      if(saved.genre)state.genre=saved.genre;
     }
+    const gBtn=document.querySelector(`#genreRow .filter-chip[data-genre="${state.genre}"]`);
+    if(gBtn){document.querySelectorAll('#genreRow .filter-chip').forEach(b=>b.classList.remove('active'));gBtn.classList.add('active');}
     const fBtn=document.querySelector(`#mainFilterRow .filter-tab[onclick*=",'${state.filter}')"]`);
     if(fBtn){document.querySelectorAll('#mainFilterRow .filter-tab').forEach(b=>b.classList.remove('active'));fBtn.classList.add('active');}
     const mBtn=document.querySelector(`#animeModeRow .filter-tab[onclick*=",'${state.animeMode}')"]`);
@@ -3853,6 +3955,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     showLoginOverlay();
     return;
   }
+  initMobileNav();
   const page = document.body.dataset.page;
   if(page === 'home') initHomePage();
   else if(page === 'anime') initAnimePage();
@@ -3892,4 +3995,5 @@ Object.assign(window, {
   moveSrcOrder, expandEpList, randomFav,
   markAllNotifsRead, exportUserData, importUserData,
   calNav, openCalDay,
+  switchGenre, importFromAniList,
 });
