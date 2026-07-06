@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌊</text></svg>">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Historie — WaterStream</title>
+<title>Kalendář — WaterStream</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
@@ -12,7 +12,7 @@
 <meta name="theme-color" content="#0d1421">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 </head>
-<body data-page="history">
+<body data-page="calendar">
 
 <header class="header">
   <div class="header-inner">
@@ -33,37 +33,18 @@
 </header>
 
 <main class="main">
-  <div class="history-page-top">
-    <div>
-      <h2 class="history-page-title">Moje sledování</h2>
-      <div id="historyStats" class="history-stats"></div>
+  <div class="cal-wrap">
+    <div class="cal-header">
+      <button class="cal-nav-btn" onclick="calNav(-1)">‹ Předchozí</button>
+      <h2 id="calTitle" style="margin:0;font-size:18px;font-weight:800;color:var(--text-1);"></h2>
+      <button class="cal-nav-btn" onclick="calNav(1)">Další ›</button>
     </div>
-    <div class="history-controls">
-      <select id="historySortSelect" class="config-input" style="width:auto;padding:8px 14px;font-size:13px;border-radius:20px;">
-        <option value="recent">Naposledy přidáno</option>
-        <option value="alpha-asc">A → Z</option>
-        <option value="alpha-desc">Z → A</option>
-        <option value="score">Hodnocení</option>
-        <option value="year">Rok vydání</option>
-      </select>
-      <div class="filter-chips">
-        <button class="filter-chip active" data-filter="all">Vše</button>
-        <button class="filter-chip" data-filter="active">Vychází</button>
-        <button class="filter-chip" data-filter="unwatched">Nerozkoukané</button>
-        <button class="filter-chip" data-filter="watched">Rozkoukané</button>
-      </div>
+    <div class="cal-grid" id="calGrid">
+      <div style="grid-column:1/-1;text-align:center;padding:60px 0;color:var(--text-3);"><div class="spinner" style="margin:0 auto;"></div></div>
     </div>
   </div>
 
-  <div class="history-tabs">
-    <button class="history-tab active" data-tab="favs" onclick="showHistoryTab('favs')">♡ Oblíbené</button>
-    <button class="history-tab" data-tab="planned" onclick="showHistoryTab('planned')">🔖 Plánované</button>
-    <button class="history-tab" data-tab="history" onclick="showHistoryTab('history')">📋 Historie</button>
-  </div>
-
-  <div id="historyPageContent">
-    <div style="text-align:center;padding:60px 0;color:var(--text-3);"><div class="spinner" style="margin:0 auto;"></div></div>
-  </div>
+  <div id="calDayDetail" style="display:none;margin-top:20px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r-xl);padding:18px;"></div>
 </main>
 
 <!-- NASTAVENÍ -->

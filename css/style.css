@@ -251,6 +251,9 @@ input,select,textarea{font-family:inherit;outline:none}
 .watch-sidebar .episodes-header{padding:14px 18px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:space-between;}
 .watch-sidebar .episodes-title{font-size:14px;font-weight:800;color:var(--text-1);}
 .watch-sidebar #epList{overflow-y:auto;flex:1;padding:8px;margin:0;}
+/* Sbalený seznam (12 epizod) — bez vnitřního scrollu, položky stojí na místě */
+.watch-sidebar.ws-static{max-height:none;}
+.watch-sidebar.ws-static #epList{overflow:visible;flex:none;}
 .watch-sidebar #epList li a{padding:10px 12px;border-radius:var(--r-sm);}
 .watch-sidebar #epList li a:hover{transform:none;}
 
@@ -331,6 +334,29 @@ input,select,textarea{font-family:inherit;outline:none}
 .notif-dd-item:hover{background:var(--surface);}
 .notif-dd-item.read{opacity:.4;}
 .notif-dd-item.read:hover{opacity:.65;}
+
+/* ── Kalendář vydávání ── */
+.cal-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r-xl);padding:18px;}
+.cal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px;}
+.cal-nav-btn{background:var(--surface);border:1px solid var(--border);color:var(--text-1);border-radius:8px;padding:7px 14px;cursor:pointer;font-weight:800;font-size:13px;font-family:inherit;transition:all .15s;}
+.cal-nav-btn:hover{border-color:var(--accent);color:var(--accent);}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
+.cal-dow{text-align:center;color:var(--text-3);font-size:11px;font-weight:800;padding:4px 0;text-transform:uppercase;letter-spacing:.5px;}
+.cal-cell{min-height:88px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px;cursor:pointer;transition:all .15s;overflow:hidden;display:flex;flex-direction:column;gap:3px;}
+.cal-cell:hover{border-color:var(--accent);}
+.cal-cell.empty{background:none;border:none;cursor:default;}
+.cal-cell.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
+.cal-daynum{font-size:11px;font-weight:800;color:var(--text-3);}
+.cal-cell.today .cal-daynum{color:var(--accent);}
+.cal-ep-chip{background:var(--accent-dim);color:var(--text-1);font-size:10px;font-weight:700;border-radius:5px;padding:2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;}
+.cal-ep-chip span{color:var(--text-3);}
+.cal-more{font-size:10px;color:var(--text-3);font-weight:800;}
+.cal-day-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;}
+@media(max-width:640px){
+  .cal-cell{min-height:52px;padding:4px;}
+  .cal-ep-chip,.cal-more{display:none;}
+  .cal-cell.has-eps .cal-daynum::after{content:'●';color:var(--accent);margin-left:3px;font-size:8px;}
+}
 
 /* ── Statistiky sledování ── */
 .history-stats{display:flex;gap:14px;margin-top:6px;flex-wrap:wrap;}

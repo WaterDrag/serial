@@ -243,7 +243,7 @@ async function runCron(env) {
       const meta   = favMeta[String(tmdbId)] || favMeta[tmdbId] || {};
       const s      = String(epInfo.season).padStart(2, '0');
       const e      = String(epInfo.ep).padStart(2, '0');
-      const lang   = epInfo.hasDab ? 'CZ dabing+titulky' : epInfo.hasTit ? 'CZ titulky' : 'CZ dostupné';
+      const lang   = epInfo.newTit && epInfo.newDab ? 'Přidány titulky i dabing' : epInfo.newDab ? 'Přidaný CZ dabing' : 'Přidané CZ titulky';
 
       const base  = (sub.appBase || '').replace(/\/$/, '');
       const payload = {

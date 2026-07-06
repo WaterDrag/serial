@@ -93,6 +93,7 @@ function renderAuthUI(user) {
           <a class="profile-menu-item" href="search.html">🔍 Hledat</a>
           <a class="profile-menu-item" href="history.html">❤️ Oblíbené</a>
           <a class="profile-menu-item" href="history.html#history">📋 Historie</a>
+          <a class="profile-menu-item" href="kalendar.html">📅 Kalendář</a>
           <div style="height:1px;background:var(--border);margin:4px 0;"></div>
           <a class="profile-menu-item" onclick="openConfig();toggleProfileDropdown()">⚙️ Nastavení</a>
           <div style="height:1px;background:var(--border);margin:4px 0;"></div>
@@ -176,7 +177,6 @@ async function syncFromFirestore() {
       }
     }
     if (d.history) localStorage.setItem('ani_history', JSON.stringify(d.history));
-    if (d.planned) localStorage.setItem('ani_planned', JSON.stringify(d.planned));
     if (d.svtState) _saveSvtState(d.svtState);
     if (d.svtNewSeries) _saveSvtNewSeries(d.svtNewSeries);
   } catch(e) {
@@ -199,7 +199,6 @@ function saveUserdataToFirestore() {
     setDoc(doc(fbDb, 'users', fbUid), {
       settings: getCfg(),
       favs:    getFavs(),
-      planned: getPlanned(),
       watched: getWatched(),
       watchedAt: watchedTs,
       history: getHistory(),
@@ -380,6 +379,18 @@ function openConfig(){
       if(saveBtn)modal.insertBefore(ps,saveBtn);else modal.appendChild(ps);
       _initPushBtn();
     }
+    if(!document.getElementById('backupSection')){
+      const saveBtn=modal.querySelector('.btn-save');
+      const bs=document.createElement('div');
+      bs.className='config-section';bs.id='backupSection';
+      bs.innerHTML=`<div class="config-section-title">💾 Záloha dat</div>
+        <div class="config-hint" style="margin-bottom:10px;">Oblíbené, zhlédnuté epizody, historie a nastavení do souboru JSON.</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button onclick="exportUserData()" class="btn-outline" style="font-size:12px;padding:8px 18px;">⬇ Exportovat</button>
+          <button onclick="importUserData()" class="btn-outline" style="font-size:12px;padding:8px 18px;">⬆ Importovat</button>
+        </div>`;
+      if(saveBtn)modal.insertBefore(bs,saveBtn);else modal.appendChild(bs);
+    }
     if(!document.getElementById('notifPrefsSection')){
       const saveBtn=modal.querySelector('.btn-save');
       const section=document.createElement('div');
@@ -414,6 +425,38 @@ function openConfig(){
   document.getElementById('configModal').classList.add('open');
 }
 function closeConfig(){document.getElementById('configModal').classList.remove('open');}
+/* ── Export / import dat (JSON záloha) ── */
+const _BACKUP_KEYS=['ani_favs','ani_watched','ani_watched_ts','ani_history','ani_cfg6','svt_state_v1','svt_notifs_v2','svt_new_series_v6','svt_fav_cz_v1','ws_home_filters'];
+function exportUserData(){
+  const data={_app:'WaterStream',_ver:1,_date:new Date().toISOString()};
+  for(const k of _BACKUP_KEYS){const v=localStorage.getItem(k);if(v!==null)data[k]=v;}
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`waterstream-zaloha-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('Záloha stažena',true);
+}
+function importUserData(){
+  const inp=document.createElement('input');
+  inp.type='file';inp.accept='.json,application/json';
+  inp.onchange=async()=>{
+    const f=inp.files?.[0];if(!f)return;
+    try{
+      const data=JSON.parse(await f.text());
+      if(data._app!=='WaterStream')throw new Error('Neplatný soubor zálohy');
+      let n=0;
+      for(const k of _BACKUP_KEYS){if(typeof data[k]==='string'){localStorage.setItem(k,data[k]);n++;}}
+      if(!n)throw new Error('Soubor neobsahuje žádná data');
+      saveUserdataToFirestore();
+      showToast(`Import hotov (${n} položek) — obnovuji stránku…`,true);
+      setTimeout(()=>location.reload(),900);
+    }catch(e){showToast('Import selhal: '+e.message);}
+  };
+  inp.click();
+}
+
 let _cfgSrcOrder=null;
 function _renderSrcOrder(order){
   _cfgSrcOrder=order;
@@ -464,25 +507,12 @@ function getWatched(){try{return JSON.parse(localStorage.getItem('ani_watched')|
 function setWatched(d){localStorage.setItem('ani_watched',JSON.stringify(d));localStorage.setItem('ani_watched_ts',Date.now().toString());saveUserdataToFirestore();}
 function getFavs(){try{return JSON.parse(localStorage.getItem('ani_favs')||'[]');}catch{return [];}}
 function setFavs(d){localStorage.setItem('ani_favs',JSON.stringify(d));saveUserdataToFirestore();}
-function getPlanned(){try{return JSON.parse(localStorage.getItem('ani_planned')||'[]');}catch{return [];}}
-function setPlanned(d){localStorage.setItem('ani_planned',JSON.stringify(d));saveUserdataToFirestore();}
 function getHistory(){try{return JSON.parse(localStorage.getItem('ani_history')||'[]');}catch{return [];}}
 function addHistory(anime){
   let h=getHistory().filter(x=>x.id!==anime.id);
   h.unshift({id:anime.id,title:anime.title,cover:anime.cover,ts:Date.now()});
   if(h.length>50)h=h.slice(0,50);
   localStorage.setItem('ani_history',JSON.stringify(h));
-  // Plánovaný seriál se při prvním přehrání přesune do oblíbených (→ notifikace)
-  const planned=getPlanned();
-  const pIdx=planned.findIndex(x=>x.id===anime.id);
-  if(pIdx>=0){
-    const[p]=planned.splice(pIdx,1);
-    localStorage.setItem('ani_planned',JSON.stringify(planned));
-    const f=getFavs();
-    if(!f.some(x=>x.id===anime.id)){f.unshift(p);setFavs(f);}
-    syncFavsToWorker();
-    showToast('🔖 → ❤️ Přesunuto z plánovaných do oblíbených',true);
-  }
   saveUserdataToFirestore();
 }
 function isEpWatched(aId,epNum,season){return !!(getWatched()[`${aId}_s${season}`]?.[epNum]);}
@@ -1295,7 +1325,7 @@ function _saveSvtStateToFirestore(state){
 }
 async function _createSvtNotif(fav,meta,ep){
   const s2=String(ep.s).padStart(2,'0'),e2=String(ep.e).padStart(2,'0');
-  const key=`${fav.id}_s${s2}e${e2}_tit`;
+  const key=`${fav.id}_s${s2}e${e2}_${meta.isDub?'dab':'tit'}`;
   const existing=_getSvtNotifs();
   if(existing.find(n=>n.key===key))return;
   let poster=null;
@@ -1440,7 +1470,7 @@ function openNotifModal(){
   wrap.style.position='relative';
   const dd=document.createElement('div');
   dd.id='notifDropdown';dd.className='notif-dropdown';
-  dd.innerHTML=`<div class="notif-dropdown-header">🔔 Nové epizody z oblíbených</div><div class="notif-dropdown-body" id="notifDropdownBody"><div style="text-align:center;padding:20px;color:var(--text-3)"><div class="spinner" style="width:20px;height:20px;border-width:2px;margin:0 auto;"></div></div></div>`;
+  dd.innerHTML=`<div class="notif-dropdown-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">🔔 Nové epizody z oblíbených<button onclick="markAllNotifsRead()" title="Označit vše jako přečtené" style="background:none;border:1px solid var(--border);color:var(--text-3);border-radius:14px;padding:3px 10px;font-size:10px;font-weight:800;cursor:pointer;flex-shrink:0;">✓ VŠE</button></div><div class="notif-dropdown-body" id="notifDropdownBody"><div style="text-align:center;padding:20px;color:var(--text-3)"><div class="spinner" style="width:20px;height:20px;border-width:2px;margin:0 auto;"></div></div></div>`;
   wrap.appendChild(dd);
   setTimeout(()=>{
     function oc(e){if(!dd.contains(e.target)&&!btn.contains(e.target)){dd.remove();document.removeEventListener('click',oc);}}
@@ -1487,10 +1517,10 @@ function loadNotifDropdown(){
     const epCode=`S${s} E${e}`;
     const timeAgo=_notifTimeAgo(now-n.ts);
     const langBadge=n.isDub
-      ?'<span class="ep-lang-btn dab" style="font-size:9px;padding:2px 6px;pointer-events:none;">DAB+TIT</span>'
-      :'<span class="ep-lang-btn tit" style="font-size:9px;padding:2px 6px;pointer-events:none;">TIT</span>';
+      ?'<span class="ep-lang-btn dab" style="font-size:9px;padding:2px 6px;pointer-events:none;">DABING</span>'
+      :'<span class="ep-lang-btn tit" style="font-size:9px;padding:2px 6px;pointer-events:none;">TITULKY</span>';
     const cover=n.showPoster?TMDB_IMG+n.showPoster:'';
-    const desc=n.isDub?'Přidané titulky a dabing':'Přidané CZ titulky';
+    const desc=n.isDub?'Přidaný dabing do epizody':'Přidané titulky do epizody';
     return `<div class="notif-dd-item${n.read?' read':''}" onclick="_markSvtNotifRead('${n.key}');document.getElementById('notifDropdown')?.remove();window.location.href='watch.html?id=${n.showId}&ep=${n.episode}&season=${n.season}'">
       <img src="${cover}" class="notif-dd-thumb">
       <div class="notif-dd-info">
@@ -1502,6 +1532,11 @@ function loadNotifDropdown(){
   }).join('');
 }
 function closeNotifModal(){document.getElementById('notifDropdown')?.remove();}
+function markAllNotifsRead(){
+  _saveSvtNotifs(_getSvtNotifs().map(n=>({...n,read:true})));
+  loadNotifDropdown();
+  renderWatchNotifs();
+}
 
 /* ══════════════════════════════════════════════════════════
    HISTORY PAGE
@@ -1645,7 +1680,8 @@ function renderHistoryContent(){
   const activeFilter=document.querySelector('.filter-chip.active')?.dataset.filter||'all';
   const container=document.getElementById('historyPageContent');
   if(!container)return;
-  let items=_historyTab==='favs'?getFavs():_historyTab==='planned'?getPlanned():getHistory();
+  // Plánované = oblíbené bez jediné zhlédnuté epizody
+  let items=_historyTab==='favs'?getFavs():_historyTab==='planned'?getFavs().filter(a=>getAnimeWatchStatus(a.id)==='none'):getHistory();
   if(activeFilter==='active'){
     if(_favActiveIds===null){
       container.innerHTML='<div style="text-align:center;padding:60px 0;color:var(--text-3);"><div class="spinner" style="margin:0 auto;"></div></div>';
@@ -1665,7 +1701,7 @@ function renderHistoryContent(){
   else if(sort==='score')items.sort((a,b)=>(b.score||0)-(a.score||0));
   else if(sort==='year')items.sort((a,b)=>(b.year||0)-(a.year||0));
   if(!items.length){
-    container.innerHTML=`<div style="text-align:center;padding:80px 0;color:var(--text-3);font-size:14px;font-weight:600;">${_historyTab==='favs'?'Žádné oblíbené anime.':_historyTab==='planned'?'Žádné plánované seriály. Přidej je tlačítkem 🔖 na detailu anime.':'Žádná historie sledování.'}</div>`;
+    container.innerHTML=`<div style="text-align:center;padding:80px 0;color:var(--text-3);font-size:14px;font-weight:600;">${_historyTab==='favs'?'Žádné oblíbené anime.':_historyTab==='planned'?'Nic v plánu — všechny oblíbené už máš rozkoukané.':'Žádná historie sledování.'}</div>`;
     return;
   }
   // Primary: dedicated fav CZ scan cache; fallback: svtNewSeries store
@@ -1761,6 +1797,7 @@ function renderEpList(){
     </a></li>`;
   };
   const eps=state.episodes;
+  const sidebar=document.querySelector('.watch-sidebar');
   // Watch stránka: ukaž jen okolí aktuální epizody (6 před + aktuální + 5 po)
   if(isWatch&&eps.length>13){
     const epKey=`${aId}_${s}_${state.currentEp?.number??''}`;
@@ -1775,8 +1812,11 @@ function renderEpList(){
     htmlOut+=eps.slice(start,end).map((ep,k)=>renderItem(ep,start+k)).join('');
     if(hiddenDown>0)htmlOut+=`<li class="ep-expand-btn" onclick="expandEpList('down')">▼ ${hiddenDown} ${_epPlural(hiddenDown)} níže</li>`;
     list.innerHTML=htmlOut;
+    // Sbalený stav = bez vnitřního scrollu; po rozbalení se scroll vrátí
+    if(sidebar)sidebar.classList.toggle('ws-static',!_epListExpandUp&&!_epListExpandDown);
     return;
   }
+  if(sidebar)sidebar.classList.toggle('ws-static',isWatch);
   list.innerHTML=eps.map((ep,i)=>renderItem(ep,i)).join('');
 }
 
@@ -2076,6 +2116,123 @@ function openTrailer(ytKey){
   document.body.appendChild(ov);
 }
 
+/* ══ KALENDÁŘ VYDÁVÁNÍ ══════════════════════════════════════════════════ */
+const _CAL_MONTHS=['Leden','Únor','Březen','Duben','Květen','Červen','Červenec','Srpen','Září','Říjen','Listopad','Prosinec'];
+const _CAL_DAYS=['Po','Út','St','Čt','Pá','So','Ne'];
+const _CAL_CACHE_KEY='ws_cal_cache_v1';
+let _calDate=null,_calEpMap=null;
+
+async function _loadCalendarData(){
+  try{
+    const c=JSON.parse(localStorage.getItem(_CAL_CACHE_KEY)||'null');
+    if(c&&Date.now()-c.ts<6*3600*1000){_calEpMap=c.map;return;}
+  }catch{}
+  const favs=getFavs();
+  const map={};
+  await Promise.allSettled(favs.map(async f=>{
+    const show=await tmdbFetch(`/tv/${f.id}`);
+    const seasons=(show.seasons||[]).filter(s=>s.season_number>0);
+    if(!seasons.length)return;
+    const latest=seasons[seasons.length-1];
+    const sd=await tmdbFetch(`/tv/${f.id}/season/${latest.season_number}`);
+    (sd.episodes||[]).forEach(ep=>{
+      if(!ep.air_date)return;
+      (map[ep.air_date]=map[ep.air_date]||[]).push({
+        id:f.id,
+        title:f.title||show.name,
+        poster:show.poster_path?TMDB_IMG+show.poster_path:(f.cover||''),
+        ep:ep.episode_number,
+        season:ep.season_number,
+      });
+    });
+  }));
+  _calEpMap=map;
+  try{localStorage.setItem(_CAL_CACHE_KEY,JSON.stringify({ts:Date.now(),map}));}catch{}
+}
+
+function renderCalendar(){
+  const grid=document.getElementById('calGrid');if(!grid)return;
+  const y=_calDate.getFullYear(),m=_calDate.getMonth();
+  document.getElementById('calTitle').textContent=`${_CAL_MONTHS[m]} ${y}`;
+  const firstDow=(new Date(y,m,1).getDay()+6)%7; // pondělí = 0
+  const daysInMonth=new Date(y,m+1,0).getDate();
+  const t=new Date();
+  const todayStr=`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+  let html=_CAL_DAYS.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+  for(let i=0;i<firstDow;i++)html+='<div class="cal-cell empty"></div>';
+  for(let d=1;d<=daysInMonth;d++){
+    const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const items=(_calEpMap?.[ds])||[];
+    const shown=items.slice(0,3);
+    html+=`<div class="cal-cell${ds===todayStr?' today':''}${items.length?' has-eps':''}" onclick="openCalDay('${ds}')">
+      <div class="cal-daynum">${d}</div>
+      ${shown.map(i=>`<div class="cal-ep-chip" title="${i.title} E${i.ep}">${i.title}<span> E${i.ep}</span></div>`).join('')}
+      ${items.length>3?`<div class="cal-more">+${items.length-3} další</div>`:''}
+    </div>`;
+  }
+  grid.innerHTML=html;
+}
+
+function calNav(dir){
+  _calDate.setMonth(_calDate.getMonth()+dir);
+  renderCalendar();
+  const det=document.getElementById('calDayDetail');
+  if(det)det.style.display='none';
+}
+
+async function openCalDay(ds){
+  const det=document.getElementById('calDayDetail');if(!det)return;
+  det.style.display='block';
+  const favItems=(_calEpMap?.[ds])||[];
+  const dayLabel=new Date(ds+'T12:00:00').toLocaleDateString('cs-CZ',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const favHtml=favItems.length
+    ?favItems.map(i=>`<div class="similar-item" onclick="window.location.href='watch.html?id=${i.id}&ep=${i.ep}&season=${i.season}'">
+        <img src="${i.poster}" class="similar-thumb" loading="lazy">
+        <div class="similar-info">
+          <div class="similar-title">${i.title}</div>
+          <div class="similar-sub">S${String(i.season).padStart(2,'0')} E${String(i.ep).padStart(2,'0')} · ❤️ oblíbené</div>
+        </div>
+      </div>`).join('')
+    :'<div style="color:var(--text-3);font-size:13px;padding:4px 0;">Žádné oblíbené tento den nevychází.</div>';
+  det.innerHTML=`<h3 style="margin:0 0 12px;font-size:16px;font-weight:800;color:var(--text-1);text-transform:capitalize;">${dayLabel}</h3>
+    <div class="episodes-title" style="margin-bottom:8px;">❤️ Oblíbené</div>
+    <div class="cal-day-grid">${favHtml}</div>
+    <div class="episodes-title" style="margin:16px 0 8px;">Ostatní anime</div>
+    <div class="cal-day-grid" id="calDayOthers"><div style="color:var(--text-3);font-size:13px;"><div class="spinner" style="width:18px;height:18px;border-width:2px;"></div></div></div>`;
+  det.scrollIntoView({behavior:'smooth',block:'nearest'});
+  try{
+    const data=await tmdbFetch('/discover/tv',{'air_date.gte':ds,'air_date.lte':ds,with_genres:'16',with_original_language:'ja',sort_by:'popularity.desc'});
+    const favIds=new Set(favItems.map(i=>i.id));
+    const others=(data?.results||[]).filter(r=>!favIds.has(r.id)&&r.poster_path).slice(0,12);
+    const el=document.getElementById('calDayOthers');
+    if(!el)return;
+    el.innerHTML=others.length
+      ?others.map(r=>`<div class="similar-item" onclick="goToAnime(${r.id})">
+          <img src="${TMDB_IMG}${r.poster_path}" class="similar-thumb" loading="lazy">
+          <div class="similar-info">
+            <div class="similar-title">${r.name}</div>
+            <div class="similar-sub">${(r.first_air_date||'').slice(0,4)}${r.vote_average?` · ★ ${r.vote_average.toFixed(1)}`:''}</div>
+          </div>
+        </div>`).join('')
+      :'<div style="color:var(--text-3);font-size:13px;">Nic dalšího nenalezeno.</div>';
+  }catch{
+    const el=document.getElementById('calDayOthers');
+    if(el)el.innerHTML='<div style="color:var(--danger);font-size:13px;">Chyba načítání.</div>';
+  }
+}
+
+async function initCalendarPage(){
+  initSearch();
+  _calDate=new Date();_calDate.setDate(1);
+  try{
+    await _loadCalendarData();
+    renderCalendar();
+  }catch(e){
+    const grid=document.getElementById('calGrid');
+    if(grid)grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;color:var(--danger);padding:40px;">Chyba: ${e.message}</div>`;
+  }
+}
+
 /* ══ NÁHODNÝ VÝBĚR Z OBLÍBENÝCH ═════════════════════════════════════════ */
 function randomFav(){
   const favs=getFavs();
@@ -2168,16 +2325,21 @@ async function checkSvtNewSeriesBackground(force=false,updateTs=true){
       }catch{}
       changed=true;
     }
-    // Zvoneček: feed obsahuje jen nedávno přidané epizody — oznam epizodu
-    // oblíbeného seriálu, pokud má překlad podle preferencí (titulky/dabing)
-    const wantsThis=(hasTit&&_prefs.titulky!==false)||(hasDab&&!!_prefs.dabing);
-    if(wantsThis&&store[slug].tmdbId&&favIds.has(store[slug].tmdbId)){
-      const lastN=store[slug].lastNotifiedEp||'0_0';
-      const[lnS,lnE]=lastN.split('_').map(Number);
-      if(season>lnS||(season===lnS&&episode>lnE)){
-        await _createSvtNotif({id:store[slug].tmdbId,title:store[slug].title},{slug,isDub:hasDab},{s:season,e:episode});
-        store[slug].lastNotifiedEp=`${season}_${episode}`;
-        changed=true;
+    // Zvoneček: každá epizoda a každý jazyk (titulky/dabing) = samostatná
+    // událost, jako na SVT. Sleduje se per-epizoda co už bylo oznámeno,
+    // takže dabing přidaný později k epizodě s titulky se oznámí taky.
+    if(store[slug].tmdbId&&favIds.has(store[slug].tmdbId)){
+      const epK=`${season}_${episode}`;
+      const nl=store[slug].notifLangs||(store[slug].notifLangs={});
+      const done=nl[epK]||{tit:false,dab:false};
+      const fav={id:store[slug].tmdbId,title:store[slug].title};
+      if(hasTit&&!done.tit&&_prefs.titulky!==false){
+        await _createSvtNotif(fav,{slug,isDub:false},{s:season,e:episode});
+        done.tit=true;nl[epK]=done;changed=true;
+      }
+      if(hasDab&&!done.dab&&!!_prefs.dabing){
+        await _createSvtNotif(fav,{slug,isDub:true},{s:season,e:episode});
+        done.dab=true;nl[epK]=done;changed=true;
       }
     }
   }
@@ -3001,22 +3163,6 @@ function updateFavBtn(){
   const btn=document.getElementById('favBtn');if(!btn)return;
   btn.className=inFav?'btn-outline active':'btn-outline';
   document.getElementById('favBtnText').textContent=inFav?'V oblíbených':'Do oblíbených';
-  updatePlannedBtn();
-}
-function togglePlanned(){
-  if(!state.currentAnime)return;
-  let p=getPlanned();const idx=p.findIndex(x=>x.id===state.currentAnime.id);
-  if(idx>=0){p.splice(idx,1);showToast('Odebráno z plánovaných');}
-  else{p.unshift(state.currentAnime);showToast('Přidáno do plánovaných',true);}
-  setPlanned(p);updatePlannedBtn();
-}
-function updatePlannedBtn(){
-  if(!state.currentAnime)return;
-  const btn=document.getElementById('plannedBtn');if(!btn)return;
-  const inPlanned=getPlanned().some(x=>x.id===state.currentAnime.id);
-  btn.className=inPlanned?'btn-outline active':'btn-outline';
-  const txt=document.getElementById('plannedBtnText');
-  if(txt)txt.textContent=inPlanned?'V plánovaných':'Plánované';
 }
 
 async function initAnimePage(){
@@ -3715,6 +3861,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   else if(page === 'watch') initWatchPage();
   else if(page === 'history') initHistoryPage();
   else if(page === 'search') initSearchPage();
+  else if(page === 'calendar') initCalendarPage();
 });
 
 /* ══════════════════════════════════════════════════════════
@@ -3744,5 +3891,7 @@ Object.assign(window, {
   browseLoadMore,
   svtNewCardClick,
   registerPushNotifications, unregisterPushNotifications,
-  moveSrcOrder, expandEpList, randomFav, togglePlanned,
+  moveSrcOrder, expandEpList, randomFav,
+  markAllNotifsRead, exportUserData, importUserData,
+  calNav, openCalDay,
 });
