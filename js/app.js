@@ -2955,18 +2955,9 @@ async function playEp(index){
   loadDiv.innerHTML='<div class="spinner"></div><span style="color:var(--text-3)">Načítám CZ zdroje...</span>';
   wrap.appendChild(loadDiv);
   try{
-    let html=await proxyFetch(`/serial/${ep.slug}/${ep.code}`);
+    const _watchToken=++_prefWatchToken;
+    const html=await proxyFetch(`/serial/${ep.slug}/${ep.code}`);
     let sources=extractSvtSources(html);
-    // Preferovaný zdroj (např. VOE) SVT někdy doplní se zpožděním — zkus jednou znovu
-    const _pref=getDefaultSource();
-    if(sources.length&&_pref!=='auto'&&!sources.some(s=>s.provider.toLowerCase()===_pref.toLowerCase())){
-      await new Promise(r=>setTimeout(r,2000));
-      try{
-        const html2=await proxyFetch(`/serial/${ep.slug}/${ep.code}`);
-        const s2=extractSvtSources(html2);
-        if(s2.some(s=>s.provider.toLowerCase()===_pref.toLowerCase())){html=html2;sources=s2;}
-      }catch{}
-    }
     if(!sources.length)throw new Error('Epizoda zatím nemá dostupné zdroje');
     sources=sortSourcesByUserOrder(sources);
     state.svtSources=sources;
@@ -2983,6 +2974,7 @@ async function playEp(index){
     document.getElementById('sourceBtns').innerHTML=sources.map((s,i)=>`<button class="source-btn" onclick="loadSvtSource(${i})">${capitalize(s.provider)}</button>`).join('');
     document.getElementById('langBadge').innerHTML=`<span class="sub-badge cz">${state.svtIsDub?'🎙️ CZ dabing':'CZ / SK'}</span>`;
     loadSvtSource(getPreferredSourceIndex(sources));
+    _watchForPreferredSource(ep,_watchToken);
   }catch(svtErr){
     loadDiv?.remove();
     ph.style.display='flex';
@@ -2992,6 +2984,39 @@ async function playEp(index){
   }
 }
 
+/* Preferovaný zdroj (VOE) SVT generuje až po prvním požadavku na stránku.
+   Přehrávání začne hned ze záložního zdroje; na pozadí se pár krát zkusí
+   znovu a jakmile preferovaný zdroj naskočí, automaticky se přepne. */
+let _prefWatchToken=0;
+async function _watchForPreferredSource(ep,token){
+  const pref=getDefaultSource();
+  if(pref==='auto')return;
+  const prefLc=pref.toLowerCase();
+  if(state.svtSources.some(s=>s.provider.toLowerCase()===prefLc))return;
+  const started=Date.now();
+  for(const delay of[3000,5000,8000]){
+    await new Promise(r=>setTimeout(r,delay));
+    if(token!==_prefWatchToken)return; // mezitím se načetla jiná epizoda
+    try{
+      const html=await proxyFetch(`/serial/${ep.slug}/${ep.code}`);
+      if(token!==_prefWatchToken)return;
+      const fresh=extractSvtSources(html);
+      if(!fresh.some(s=>s.provider.toLowerCase()===prefLc))continue;
+      const sorted=sortSourcesByUserOrder(fresh);
+      state.svtSources=sorted;
+      const btns=document.getElementById('sourceBtns');
+      if(btns)btns.innerHTML=sorted.map((s,i)=>`<button class="source-btn" onclick="loadSvtSource(${i})">${capitalize(s.provider)}</button>`).join('');
+      const prefIdx=sorted.findIndex(s=>s.provider.toLowerCase()===prefLc);
+      if(Date.now()-started<25000){
+        loadSvtSource(prefIdx);
+        showToast(`Přepnuto na ${capitalize(pref)}`,true);
+      }else{
+        showToast(`${capitalize(pref)} je nyní dostupný`,true);
+      }
+      return;
+    }catch{}
+  }
+}
 function loadSvtSource(index){
   const src=state.svtSources?.[index];if(!src)return;
   state.svtSourceIndex=index;
