@@ -332,6 +332,10 @@ input,select,textarea{font-family:inherit;outline:none}
 .notif-dd-item.read{opacity:.4;}
 .notif-dd-item.read:hover{opacity:.65;}
 
+/* ── Statistiky sledování ── */
+.history-stats{display:flex;gap:14px;margin-top:6px;flex-wrap:wrap;}
+.history-stats span{color:var(--text-3);font-size:12px;font-weight:700;}
+
 /* ── Mřížka sérií (SVT style) ── */
 .season-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:18px;}
 .season-grid-item{display:flex;align-items:center;justify-content:space-between;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:13px 16px;cursor:pointer;font-weight:800;font-size:13px;letter-spacing:.6px;color:var(--text-2);transition:all .15s;user-select:none;}

@@ -31,7 +31,10 @@
 
 <main class="main">
   <div class="history-page-top">
-    <h2 class="history-page-title">Moje sledování</h2>
+    <div>
+      <h2 class="history-page-title">Moje sledování</h2>
+      <div id="historyStats" class="history-stats"></div>
+    </div>
     <div class="history-controls">
       <select id="historySortSelect" class="config-input" style="width:auto;padding:8px 14px;font-size:13px;border-radius:20px;">
         <option value="recent">Naposledy přidáno</option>
@@ -51,6 +54,7 @@
 
   <div class="history-tabs">
     <button class="history-tab active" data-tab="favs" onclick="showHistoryTab('favs')">♡ Oblíbené</button>
+    <button class="history-tab" data-tab="planned" onclick="showHistoryTab('planned')">🔖 Plánované</button>
     <button class="history-tab" data-tab="history" onclick="showHistoryTab('history')">📋 Historie</button>
   </div>
 

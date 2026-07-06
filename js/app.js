@@ -176,6 +176,7 @@ async function syncFromFirestore() {
       }
     }
     if (d.history) localStorage.setItem('ani_history', JSON.stringify(d.history));
+    if (d.planned) localStorage.setItem('ani_planned', JSON.stringify(d.planned));
     if (d.svtState) _saveSvtState(d.svtState);
     if (d.svtNewSeries) _saveSvtNewSeries(d.svtNewSeries);
   } catch(e) {
@@ -198,6 +199,7 @@ function saveUserdataToFirestore() {
     setDoc(doc(fbDb, 'users', fbUid), {
       settings: getCfg(),
       favs:    getFavs(),
+      planned: getPlanned(),
       watched: getWatched(),
       watchedAt: watchedTs,
       history: getHistory(),
@@ -371,8 +373,8 @@ function openConfig(){
       ps.innerHTML=`<div class="config-section-title">🔔 Push notifikace (pozadí)</div>
         <div class="config-field">
           <label class="config-label">Push Worker URL <span id="pushWorkerStatus" class="config-status"></span></label>
-          <input class="config-input" type="text" id="cfgPushWorker" placeholder="https://ws-push.zitkatomik007.workers.dev">
-          <div class="config-hint">URL nového Push Workeru (worker-push.js). Bez tohoto pole push notifikace nefungují.</div>
+          <input class="config-input" type="text" id="cfgPushWorker" placeholder="Výchozí: waterstreampush.zitkatomik007.workers.dev">
+          <div class="config-hint">Volitelné — nech prázdné pro výchozí worker. Vlastní worker (worker-push.js) zadej jen pokud si hostuješ svůj.</div>
         </div>
         <button id="pushToggleBtn" class="btn-outline" style="margin-top:8px;width:100%;padding:10px;border-radius:10px;font-size:13px;font-weight:700;">🔔 Zapnout push</button>`;
       if(saveBtn)modal.insertBefore(ps,saveBtn);else modal.appendChild(ps);
@@ -387,6 +389,7 @@ function openConfig(){
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:8px 16px;font-size:13px;font-weight:700;color:var(--text-2);transition:all .15s;"><input type="checkbox" id="notifTitulky" style="accent-color:var(--accent);width:14px;height:14px;flex-shrink:0;"><span>💬 Titulky</span></label>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:8px 16px;font-size:13px;font-weight:700;color:var(--text-2);transition:all .15s;"><input type="checkbox" id="notifDabing" style="accent-color:var(--accent);width:14px;height:14px;flex-shrink:0;"><span>🔊 Dabing</span></label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:8px 16px;font-size:13px;font-weight:700;color:var(--text-2);transition:all .15s;"><input type="checkbox" id="notifTabBadge" style="accent-color:var(--accent);width:14px;height:14px;flex-shrink:0;"><span>🔢 Počet v titulku tabu</span></label>
         </div>`;
       if(saveBtn)modal.insertBefore(section,saveBtn);else modal.appendChild(section);
     }
@@ -394,7 +397,7 @@ function openConfig(){
   const cfg=getCfg();
   document.getElementById('cfgProxy').value=cfg.proxy||DEFAULT_PROXY;
   document.getElementById('cfgSource').value=cfg.defaultSource||'auto';
-  if(document.getElementById('cfgPushWorker')){document.getElementById('cfgPushWorker').value=cfg.pushWorkerUrl||'';setStatusBadge('pushWorkerStatus',!!cfg.pushWorkerUrl);}
+  if(document.getElementById('cfgPushWorker')){document.getElementById('cfgPushWorker').value=cfg.pushWorkerUrl||'';setStatusBadge('pushWorkerStatus',true);}
   if(document.getElementById('cfgTmdbKey'))document.getElementById('cfgTmdbKey').value=cfg.tmdbKey||'';
   setStatusBadge('tmdbKeyStatus',!!cfg.tmdbKey);
   if(document.getElementById('cfgGeminiKey'))document.getElementById('cfgGeminiKey').value=cfg.geminiKey||'';
@@ -405,6 +408,8 @@ function openConfig(){
   const tel=document.getElementById('notifTitulky');const del=document.getElementById('notifDabing');
   if(tel)tel.checked=notif.titulky!==false;
   if(del)del.checked=!!notif.dabing;
+  const tbEl=document.getElementById('notifTabBadge');
+  if(tbEl)tbEl.checked=cfg.tabBadge!==false;
   setStatusBadge('proxyStatus',!!cfg.proxy);
   document.getElementById('configModal').classList.add('open');
 }
@@ -447,10 +452,10 @@ function saveConfig(){
     titulky:document.getElementById('notifTitulky')?.checked!==false,
     dabing:!!document.getElementById('notifDabing')?.checked,
   };
+  cfg.tabBadge=document.getElementById('notifTabBadge')?.checked!==false;
+  if(cfg.tabBadge===false)document.title=document.title.replace(/^\(\d+\+?\)\s*/,'');
   if(Array.isArray(_cfgSrcOrder)&&_cfgSrcOrder.length)cfg.sourceOrder=_cfgSrcOrder.slice();
-  const newPushUrl=(document.getElementById('cfgPushWorker')?.value||'').trim().replace(/\/$/,'');
-  if(newPushUrl!==cfg.pushWorkerUrl&&!newPushUrl)unregisterPushNotifications().catch(()=>{});
-  cfg.pushWorkerUrl=newPushUrl;
+  cfg.pushWorkerUrl=(document.getElementById('cfgPushWorker')?.value||'').trim().replace(/\/$/,'');
   setCfg(cfg);closeConfig();showToast('Nastavení uloženo',true);saveSettingsToFirestore();syncFavsToWorker();
   if(cfg.tmdbKey)hideTmdbPrompt();
 }
@@ -459,12 +464,25 @@ function getWatched(){try{return JSON.parse(localStorage.getItem('ani_watched')|
 function setWatched(d){localStorage.setItem('ani_watched',JSON.stringify(d));localStorage.setItem('ani_watched_ts',Date.now().toString());saveUserdataToFirestore();}
 function getFavs(){try{return JSON.parse(localStorage.getItem('ani_favs')||'[]');}catch{return [];}}
 function setFavs(d){localStorage.setItem('ani_favs',JSON.stringify(d));saveUserdataToFirestore();}
+function getPlanned(){try{return JSON.parse(localStorage.getItem('ani_planned')||'[]');}catch{return [];}}
+function setPlanned(d){localStorage.setItem('ani_planned',JSON.stringify(d));saveUserdataToFirestore();}
 function getHistory(){try{return JSON.parse(localStorage.getItem('ani_history')||'[]');}catch{return [];}}
 function addHistory(anime){
   let h=getHistory().filter(x=>x.id!==anime.id);
   h.unshift({id:anime.id,title:anime.title,cover:anime.cover,ts:Date.now()});
   if(h.length>50)h=h.slice(0,50);
   localStorage.setItem('ani_history',JSON.stringify(h));
+  // Plánovaný seriál se při prvním přehrání přesune do oblíbených (→ notifikace)
+  const planned=getPlanned();
+  const pIdx=planned.findIndex(x=>x.id===anime.id);
+  if(pIdx>=0){
+    const[p]=planned.splice(pIdx,1);
+    localStorage.setItem('ani_planned',JSON.stringify(planned));
+    const f=getFavs();
+    if(!f.some(x=>x.id===anime.id)){f.unshift(p);setFavs(f);}
+    syncFavsToWorker();
+    showToast('🔖 → ❤️ Přesunuto z plánovaných do oblíbených',true);
+  }
   saveUserdataToFirestore();
 }
 function isEpWatched(aId,epNum,season){return !!(getWatched()[`${aId}_s${season}`]?.[epNum]);}
@@ -1429,11 +1447,8 @@ function openNotifModal(){
     document.addEventListener('click',oc);
   },10);
   loadNotifDropdown();
-  // Čerstvá kontrola SVT feedu při otevření zvonečku (max 1× za 15 min)
-  const _lastScan=parseInt(localStorage.getItem(_SVT_SERIES_TS)||'0');
-  if(Date.now()-_lastScan>15*60*1000){
-    checkSvtNewSeriesBackground(true).then(()=>loadNotifDropdown()).catch(()=>{});
-  }
+  // Čerstvý scan při každém otevření zvonečku — neresetuje 3h časovač scanu na pozadí
+  checkSvtNewSeriesBackground(true,false).then(()=>loadNotifDropdown()).catch(()=>{});
 }
 function _notifTimeAgo(ms){
   const m=Math.floor(ms/60000),h=Math.floor(ms/3600000),d=Math.floor(ms/86400000);
@@ -1450,6 +1465,9 @@ function _updateNotifBadge(count){
       badge.textContent=count>9?'9+':count;
     }else if(badge){badge.remove();}
   });
+  // Počet nepřečtených v titulku tabu (vypnutelné v nastavení)
+  const base=document.title.replace(/^\(\d+\+?\)\s*/,'');
+  document.title=(count>0&&getCfg().tabBadge!==false)?`(${count>9?'9+':count}) ${base}`:base;
 }
 function loadNotifDropdown(){
   const body=document.getElementById('notifDropdownBody');if(!body)return;
@@ -1627,7 +1645,7 @@ function renderHistoryContent(){
   const activeFilter=document.querySelector('.filter-chip.active')?.dataset.filter||'all';
   const container=document.getElementById('historyPageContent');
   if(!container)return;
-  let items=_historyTab==='favs'?getFavs():getHistory();
+  let items=_historyTab==='favs'?getFavs():_historyTab==='planned'?getPlanned():getHistory();
   if(activeFilter==='active'){
     if(_favActiveIds===null){
       container.innerHTML='<div style="text-align:center;padding:60px 0;color:var(--text-3);"><div class="spinner" style="margin:0 auto;"></div></div>';
@@ -1647,7 +1665,7 @@ function renderHistoryContent(){
   else if(sort==='score')items.sort((a,b)=>(b.score||0)-(a.score||0));
   else if(sort==='year')items.sort((a,b)=>(b.year||0)-(a.year||0));
   if(!items.length){
-    container.innerHTML=`<div style="text-align:center;padding:80px 0;color:var(--text-3);font-size:14px;font-weight:600;">${_historyTab==='favs'?'Žádné oblíbené anime.':'Žádná historie sledování.'}</div>`;
+    container.innerHTML=`<div style="text-align:center;padding:80px 0;color:var(--text-3);font-size:14px;font-weight:600;">${_historyTab==='favs'?'Žádné oblíbené anime.':_historyTab==='planned'?'Žádné plánované seriály. Přidej je tlačítkem 🔖 na detailu anime.':'Žádná historie sledování.'}</div>`;
     return;
   }
   // Primary: dedicated fav CZ scan cache; fallback: svtNewSeries store
@@ -1679,8 +1697,25 @@ function renderHistoryContent(){
   _enrichCardsWithEpCounts(items);
 }
 
+function renderHistoryStats(){
+  const el=document.getElementById('historyStats');if(!el)return;
+  const w=getWatched();
+  const ids=new Set();let total=0;
+  for(const[k,eps]of Object.entries(w)){
+    const m=k.match(/^(\d+)_s\d+$/);if(!m)continue;
+    const cnt=Object.values(eps).filter(Boolean).length;
+    if(cnt){ids.add(m[1]);total+=cnt;}
+  }
+  let completed=0,watching=0;
+  for(const id of ids){
+    const st=getAnimeWatchStatus(id);
+    if(st==='completed')completed++;else if(st==='watching')watching++;
+  }
+  el.innerHTML=`<span>📺 ${total} epizod</span><span>▶ ${watching} rozkoukáno</span><span>✅ ${completed} dokončeno</span>`;
+}
 function initHistoryPage(){
   initSearch();
+  renderHistoryStats();
   showHistoryTab(location.hash==='#history'?'history':'favs');
   window.addEventListener('hashchange',()=>showHistoryTab(location.hash==='#history'?'history':'favs'));
   document.getElementById('historySortSelect')?.addEventListener('change',renderHistoryContent);
@@ -2060,12 +2095,16 @@ const _svtTmdbCache={};
 function _getSvtNewSeries(){try{return JSON.parse(localStorage.getItem(_SVT_SERIES_KEY)||'{}');}catch{return{};}}
 function _saveSvtNewSeries(obj){localStorage.setItem(_SVT_SERIES_KEY,JSON.stringify(obj));}
 
-async function checkSvtNewSeriesBackground(force=false){
+let _svtScanRunning=false;
+async function checkSvtNewSeriesBackground(force=false,updateTs=true){
   if(!getProxy())return;
+  if(_svtScanRunning)return;
   if(!force){
     const lastCheck=parseInt(localStorage.getItem(_SVT_SERIES_TS)||'0');
     if(Date.now()-lastCheck<_SVT_SERIES_INTERVAL)return;
   }
+  _svtScanRunning=true;
+  try{
   const proxy=getProxy();
   try{
     await fetch(proxy+'/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'episodes=1&setFilter=1'});
@@ -2171,8 +2210,9 @@ async function checkSvtNewSeriesBackground(force=false){
     _saveSvtNewSeries(store);
     if(fbDb&&fbUid)setDoc(doc(fbDb,'users',fbUid),{svtNewSeries:store},{merge:true}).catch(()=>{});
   }
-  localStorage.setItem(_SVT_SERIES_TS,Date.now().toString());
+  if(updateTs)localStorage.setItem(_SVT_SERIES_TS,Date.now().toString());
   _updateNotifBadge(_getSvtNotifs().filter(n=>!n.read).length);
+  }finally{_svtScanRunning=false;}
 }
 
 async function loadSvtNewEpisodes(){
@@ -2961,6 +3001,22 @@ function updateFavBtn(){
   const btn=document.getElementById('favBtn');if(!btn)return;
   btn.className=inFav?'btn-outline active':'btn-outline';
   document.getElementById('favBtnText').textContent=inFav?'V oblíbených':'Do oblíbených';
+  updatePlannedBtn();
+}
+function togglePlanned(){
+  if(!state.currentAnime)return;
+  let p=getPlanned();const idx=p.findIndex(x=>x.id===state.currentAnime.id);
+  if(idx>=0){p.splice(idx,1);showToast('Odebráno z plánovaných');}
+  else{p.unshift(state.currentAnime);showToast('Přidáno do plánovaných',true);}
+  setPlanned(p);updatePlannedBtn();
+}
+function updatePlannedBtn(){
+  if(!state.currentAnime)return;
+  const btn=document.getElementById('plannedBtn');if(!btn)return;
+  const inPlanned=getPlanned().some(x=>x.id===state.currentAnime.id);
+  btn.className=inPlanned?'btn-outline active':'btn-outline';
+  const txt=document.getElementById('plannedBtnText');
+  if(txt)txt.textContent=inPlanned?'V plánovaných':'Plánované';
 }
 
 async function initAnimePage(){
@@ -3539,7 +3595,8 @@ const _VAPID_PUBLIC_KEY = 'BF7ZKQsAKWEn7jG413pG4YTjWtF0L_Ou9qxUK94rbhHowq17ASi3S
 // Tuto hodnotu zkopíruj jako secret VAPID_PRIVATE_JWK do Cloudflare Worker
 const _VAPID_PRIVATE_JWK = '{"key_ops":["sign"],"ext":true,"kty":"EC","x":"XtkpCwApYSfuMbjXekbhhONa0XQv8672rFQr3ituEeg","y":"wq17ASi3SNXG3qony-lRqtGMVEeAmZi_smVJvf5xb8Q","crv":"P-256","d":"OXJDGcoM6oPsxtdfkjjtOXmVLkzl7FyaLPbqyuTZHGs"}';
 
-function getPushWorkerUrl(){return(getCfg().pushWorkerUrl||'').replace(/\/$/,'');}
+const DEFAULT_PUSH_WORKER='https://waterstreampush.zitkatomik007.workers.dev';
+function getPushWorkerUrl(){return(getCfg().pushWorkerUrl||DEFAULT_PUSH_WORKER).replace(/\/$/,'');}
 
 function _vapidKeyToUint8(b64url){
   const b64=b64url.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(b64url.length/4)*4,'=');
@@ -3687,5 +3744,5 @@ Object.assign(window, {
   browseLoadMore,
   svtNewCardClick,
   registerPushNotifications, unregisterPushNotifications,
-  moveSrcOrder, expandEpList, randomFav,
+  moveSrcOrder, expandEpList, randomFav, togglePlanned,
 });
