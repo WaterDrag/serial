@@ -331,6 +331,31 @@ input,select,textarea{font-family:inherit;outline:none}
 .notif-dd-item:hover{background:var(--surface);}
 .notif-dd-item.read{opacity:.4;}
 .notif-dd-item.read:hover{opacity:.65;}
+
+/* ── Mřížka sérií (SVT style) ── */
+.season-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:18px;}
+.season-grid-item{display:flex;align-items:center;justify-content:space-between;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:13px 16px;cursor:pointer;font-weight:800;font-size:13px;letter-spacing:.6px;color:var(--text-2);transition:all .15s;user-select:none;}
+.season-grid-item:hover{border-color:var(--accent);color:var(--text-1);}
+.season-grid-item.active{border-color:var(--accent);color:var(--accent);background:var(--surface);}
+.season-grid-item .sg-num{color:var(--text-3);margin-right:2px;}
+.season-grid-item.active .sg-num{color:var(--accent);}
+.season-grid-item .sg-plus{font-size:17px;font-weight:400;color:var(--text-3);line-height:1;}
+.season-grid-item.active .sg-plus{color:var(--accent);}
+
+/* ── Sbalený seznam epizod (watch) ── */
+.ep-expand-btn{list-style:none;text-align:center;padding:9px;margin:2px 0;background:var(--surface);border:1px dashed var(--border);border-radius:8px;color:var(--text-3);font-size:11px;font-weight:800;letter-spacing:.6px;cursor:pointer;text-transform:uppercase;transition:all .15s;}
+.ep-expand-btn:hover{color:var(--accent);border-color:var(--accent);}
+
+/* ── Podobné seriály + watch notifikace ── */
+.similar-item{display:flex;align-items:center;gap:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:8px 12px;cursor:pointer;transition:all .15s;margin-bottom:8px;}
+.similar-item:hover{border-color:var(--accent);background:var(--surface);}
+.similar-thumb{width:38px;height:54px;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--surface);}
+.similar-info{flex:1;min-width:0;}
+.similar-title{color:var(--text-1);font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.similar-sub{color:var(--text-3);font-size:11px;margin-top:3px;}
+#detailHeader~#similarSection #similarList,.episodes-section #similarList{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;}
+.watch-sidebar #similarList{display:block;}
+.watch-sidebar #similarSection .similar-item{margin-bottom:8px;}
 .notif-dd-thumb{width:34px;height:48px;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--surface);}
 .notif-dd-info{flex:1;min-width:0;}
 .notif-dd-title{color:var(--text-1);font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}

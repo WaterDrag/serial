@@ -1697,13 +1697,19 @@ function initHistoryPage(){
 /* ══════════════════════════════════════════════════════════
    SDÍLENÉ RENDEROVÁNÍ EPIZOD
 ══════════════════════════════════════════════════════════ */
+let _epListExpandUp=false,_epListExpandDown=false,_epListLastEpKey=null;
+function expandEpList(dir){
+  if(dir==='up')_epListExpandUp=true;else _epListExpandDown=true;
+  renderEpList();
+}
+function _epPlural(n){return n===1?'epizoda':n<5?'epizody':'epizod';}
 function renderEpList(){
   const list=document.getElementById('epList');if(!list)return;
   const aId=state.currentAnime?.id,s=state.currentSeason;
   const isWatch=document.body.dataset.page==='watch';
   const svtDub=state.svtIsDub;
   const checkSvg=`<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`;
-  list.innerHTML=state.episodes.map((ep,i)=>{
+  const renderItem=(ep,i)=>{
     const w=isEpWatched(aId,ep.number,s);
     const curr=isWatch&&state.currentEp?.number===ep.number;
     const epHasCz=state.modes.svt&&(ep.hasCz??true);
@@ -1717,7 +1723,71 @@ function renderEpList(){
       ${langBtns}
       <button class="ep-watched-btn${w?' checked':''}" onclick="toggleEpWatched(event,${i})" title="${w?'Zrušit zhlédnutí':'Označit jako zhlédnuté'}">${checkSvg}</button>
     </a></li>`;
+  };
+  const eps=state.episodes;
+  // Watch stránka: ukaž jen okolí aktuální epizody (6 před + aktuální + 5 po)
+  if(isWatch&&eps.length>13){
+    const epKey=`${aId}_${s}_${state.currentEp?.number??''}`;
+    if(epKey!==_epListLastEpKey){_epListExpandUp=false;_epListExpandDown=false;_epListLastEpKey=epKey;}
+    let ci=eps.findIndex(e=>e.number===state.currentEp?.number);
+    if(ci<0)ci=0;
+    const start=_epListExpandUp?0:Math.max(0,ci-6);
+    const end=_epListExpandDown?eps.length:Math.min(eps.length,ci+6);
+    const hiddenUp=start,hiddenDown=eps.length-end;
+    let htmlOut='';
+    if(hiddenUp>0)htmlOut+=`<li class="ep-expand-btn" onclick="expandEpList('up')">▲ ${hiddenUp} ${_epPlural(hiddenUp)} výše</li>`;
+    htmlOut+=eps.slice(start,end).map((ep,k)=>renderItem(ep,start+k)).join('');
+    if(hiddenDown>0)htmlOut+=`<li class="ep-expand-btn" onclick="expandEpList('down')">▼ ${hiddenDown} ${_epPlural(hiddenDown)} níže</li>`;
+    list.innerHTML=htmlOut;
+    return;
+  }
+  list.innerHTML=eps.map((ep,i)=>renderItem(ep,i)).join('');
+}
+
+/* Nepřečtené notifikace ze zvonečku — sidebar na watch stránce */
+function renderWatchNotifs(){
+  const section=document.getElementById('watchNotifSection');
+  const listEl=document.getElementById('watchNotifList');
+  if(!section||!listEl)return;
+  const now=Date.now();
+  const unread=_getSvtNotifs().filter(n=>!n.read&&now-n.ts<30*24*3600*1000).sort((a,b)=>b.ts-a.ts).slice(0,8);
+  if(!unread.length){section.style.display='none';return;}
+  section.style.display='block';
+  listEl.innerHTML=unread.map(n=>{
+    const se=`S${String(n.season).padStart(2,'0')} E${String(n.episode).padStart(2,'0')}`;
+    const cover=n.showPoster?TMDB_IMG+n.showPoster:'';
+    return `<div class="similar-item" onclick="_markSvtNotifRead('${n.key}');window.location.href='watch.html?id=${n.showId}&ep=${n.episode}&season=${n.season}'">
+      <img src="${cover}" class="similar-thumb" loading="lazy">
+      <div class="similar-info">
+        <div class="similar-title">${n.showName}</div>
+        <div class="similar-sub">${se} · ${_notifTimeAgo(now-n.ts)}</div>
+      </div>
+    </div>`;
   }).join('');
+}
+
+/* Podobné seriály — TMDB doporučení (anime detail + watch sidebar) */
+async function loadSimilar(animeId){
+  const section=document.getElementById('similarSection');
+  const listEl=document.getElementById('similarList');
+  if(!section||!listEl)return;
+  try{
+    const data=await tmdbFetch(`/tv/${animeId}/recommendations`);
+    const items=(data?.results||[]).filter(r=>r.poster_path).slice(0,8);
+    if(!items.length){section.style.display='none';return;}
+    section.style.display='block';
+    listEl.innerHTML=items.map(r=>{
+      const year=(r.first_air_date||'').slice(0,4);
+      const score=r.vote_average?r.vote_average.toFixed(1):null;
+      return `<div class="similar-item" onclick="goToAnime(${r.id})">
+        <img src="${TMDB_IMG}${r.poster_path}" class="similar-thumb" loading="lazy">
+        <div class="similar-info">
+          <div class="similar-title">${r.name}</div>
+          <div class="similar-sub">${year}${score?` · ★ ${score}`:''}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }catch{section.style.display='none';}
 }
 
 function playEpWithMode(event,epNumber,season,mode){
@@ -2524,6 +2594,8 @@ function activateMode(mode){
 }
 
 function renderSeasonTabs(){
+  // Anime detail: mřížka sérií jako na SVT; watch stránka: dropdown
+  if(document.body.dataset.page==='anime'){renderSeasonGrid();return;}
   const tabs=document.getElementById('seasonTabs');if(!tabs)return;
   if(state.availableSeasons.length<=1){tabs.style.display='none';return;}
   tabs.style.display='block';
@@ -2534,6 +2606,23 @@ function renderSeasonTabs(){
   });
   sel.onchange=()=>switchSeason(parseInt(sel.value));
   tabs.innerHTML='';tabs.appendChild(sel);
+}
+function renderSeasonGrid(){
+  const tabs=document.getElementById('seasonTabs');
+  if(tabs)tabs.style.display='none';
+  const epList=document.getElementById('epList');if(!epList)return;
+  let grid=document.getElementById('seasonGrid');
+  if(state.availableSeasons.length<=1){if(grid)grid.remove();return;}
+  if(!grid){
+    grid=document.createElement('div');
+    grid.id='seasonGrid';grid.className='season-grid';
+    epList.parentNode.insertBefore(grid,epList);
+  }
+  grid.innerHTML=state.availableSeasons.map(s=>
+    `<div class="season-grid-item${s===state.currentSeason?' active':''}" onclick="switchSeason(${s})">
+      <span><span class="sg-num">${s}.</span> SÉRIE</span>
+      <span class="sg-plus">${s===state.currentSeason?'−':'+'}</span>
+    </div>`).join('');
 }
 async function switchSeason(season){
   if(season===state.currentSeason&&state.allSeasons[season])return;
@@ -2546,7 +2635,7 @@ async function switchSeason(season){
       state.allSeasons[season]=await svtEpisodes(state.svtSlug,season,state.svtTvShowId);
     }
     state.episodes=state.allSeasons[season];state.currentEp=null;
-    renderEpList();setupMainPlayBtn();
+    renderEpList();setupMainPlayBtn();renderSeasonTabs();
   }catch(e){document.getElementById('epList').innerHTML=`<li style="color:var(--danger);padding:20px;text-align:center;">Chyba: ${e.message}</li>`;}
 }
 function setupMainPlayBtn(){
@@ -2788,6 +2877,7 @@ async function initAnimePage(){
   const epList=document.getElementById('epList');
   function setMsg(msg){if(epList)epList.innerHTML=`<li style="padding:20px;text-align:center;color:var(--text-3);display:flex;align-items:center;justify-content:center;gap:10px;"><div class="spinner" style="width:20px;height:20px;border-width:2px;"></div> ${msg}</li>`;}
   setMsg('Načítám anime…');
+  loadSimilar(animeId).catch(()=>{});
 
   let anime;
   try{anime=await fetchAnimeDetail(animeId);}
@@ -3216,6 +3306,9 @@ async function initWatchPage(){
 
   if(!animeId){document.title='WaterStream';return;}
 
+  renderWatchNotifs();
+  loadSimilar(animeId).catch(()=>{});
+
   let cached=null;
   try{
     const raw=sessionStorage.getItem('ani_watch_state');
@@ -3498,5 +3591,5 @@ Object.assign(window, {
   browseLoadMore,
   svtNewCardClick,
   registerPushNotifications, unregisterPushNotifications,
-  moveSrcOrder,
+  moveSrcOrder, expandEpList,
 });
