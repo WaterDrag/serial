@@ -352,6 +352,18 @@ function openConfig(){
       _initCustomSliders();
     }
     _syncAppearUI();
+    if(!document.getElementById('srcOrderField')){
+      const srcField=document.getElementById('cfgSource')?.closest('.config-field');
+      if(srcField){
+        const f=document.createElement('div');
+        f.className='config-field';f.id='srcOrderField';
+        f.innerHTML=`<label class="config-label">Pořadí záložních zdrojů</label>
+          <div id="srcOrderList" style="display:flex;flex-direction:column;gap:6px;"></div>
+          <div class="config-hint">Když preferovaný zdroj není dostupný, použije se první dostupný z tohoto pořadí. Stejné pořadí se zkouší i při výpadku zdroje.</div>`;
+        srcField.after(f);
+      }
+    }
+    _renderSrcOrder(getSourceOrder());
     if(!document.getElementById('pushSection')){
       const saveBtn=modal.querySelector('.btn-save');
       const ps=document.createElement('div');
@@ -397,6 +409,25 @@ function openConfig(){
   document.getElementById('configModal').classList.add('open');
 }
 function closeConfig(){document.getElementById('configModal').classList.remove('open');}
+let _cfgSrcOrder=null;
+function _renderSrcOrder(order){
+  _cfgSrcOrder=order;
+  const list=document.getElementById('srcOrderList');if(!list)return;
+  const btnCss='background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-2);cursor:pointer;padding:2px 9px;font-size:13px;line-height:1.4;';
+  list.innerHTML=order.map((p,i)=>`<div style="display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 10px;">
+    <span style="width:18px;color:var(--text-3);font-size:12px;font-weight:800;">${i+1}.</span>
+    <span style="flex:1;font-size:13px;font-weight:700;color:var(--text-1);">${capitalize(p)}</span>
+    <button style="${btnCss}${i===0?'opacity:.3;cursor:default;':''}" onclick="moveSrcOrder(${i},-1)">↑</button>
+    <button style="${btnCss}${i===order.length-1?'opacity:.3;cursor:default;':''}" onclick="moveSrcOrder(${i},1)">↓</button>
+  </div>`).join('');
+}
+function moveSrcOrder(i,dir){
+  if(!_cfgSrcOrder)return;
+  const j=i+dir;
+  if(j<0||j>=_cfgSrcOrder.length)return;
+  [_cfgSrcOrder[i],_cfgSrcOrder[j]]=[_cfgSrcOrder[j],_cfgSrcOrder[i]];
+  _renderSrcOrder(_cfgSrcOrder);
+}
 function setStatusBadge(id,ok){
   const el=document.getElementById(id);if(!el)return;
   el.className='config-status '+(ok?'ok':'missing');
@@ -416,6 +447,7 @@ function saveConfig(){
     titulky:document.getElementById('notifTitulky')?.checked!==false,
     dabing:!!document.getElementById('notifDabing')?.checked,
   };
+  if(Array.isArray(_cfgSrcOrder)&&_cfgSrcOrder.length)cfg.sourceOrder=_cfgSrcOrder.slice();
   const newPushUrl=(document.getElementById('cfgPushWorker')?.value||'').trim().replace(/\/$/,'');
   if(newPushUrl!==cfg.pushWorkerUrl&&!newPushUrl)unregisterPushNotifications().catch(()=>{});
   cfg.pushWorkerUrl=newPushUrl;
@@ -1310,11 +1342,24 @@ async function checkSvtNotificationsBackground(){
   localStorage.setItem(_SVT_CHECK_TS,Date.now().toString());
   _updateNotifBadge(_getSvtNotifs().filter(n=>!n.read).length);
 }
+const _SRC_ORDER_DEFAULT=['voe','filemoon','doodstream','vidmoly','streamtape','mixdrop'];
+function getSourceOrder(){
+  const o=getCfg().sourceOrder;
+  return Array.isArray(o)&&o.length?o.slice():_SRC_ORDER_DEFAULT.slice();
+}
+function sortSourcesByUserOrder(sources){
+  const order=getSourceOrder();
+  return sources.slice().sort((a,b)=>{
+    let ia=order.indexOf(a.provider.toLowerCase());
+    let ib=order.indexOf(b.provider.toLowerCase());
+    if(ia<0)ia=99;if(ib<0)ib=99;
+    return ia-ib;
+  });
+}
 function getPreferredSourceIndex(sources){
   const pref=getDefaultSource();
   if(pref!=='auto'){const idx=sources.findIndex(s=>s.provider.toLowerCase()===pref.toLowerCase());if(idx>=0)return idx;}
-  const order=['voe','filemoon','doodstream','vidmoly','streamtape','mixdrop'];
-  for(const name of order){const idx=sources.findIndex(s=>s.provider.toLowerCase()===name);if(idx>=0)return idx;}
+  for(const name of getSourceOrder()){const idx=sources.findIndex(s=>s.provider.toLowerCase()===name);if(idx>=0)return idx;}
   return 0;
 }
 
@@ -1327,6 +1372,11 @@ function initSearch(){
   if(!inp||!res)return;
   // Chrome autofill sem předvyplňuje uloženou proxy URL — vyčisti, pokud nejde o ?q
   inp.setAttribute('name','ws-search-nofill');
+  // Anti-autofill: readonly pole Chrome nevyplňuje; odeber při prvním kliknutí/focusu
+  inp.setAttribute('readonly','');
+  const _unlock=()=>inp.removeAttribute('readonly');
+  inp.addEventListener('focus',_unlock);
+  inp.addEventListener('pointerdown',_unlock);
   const _clearAutofill=()=>{
     if(inp.value&&!new URLSearchParams(location.search).get('q')&&inp.value.startsWith('http'))inp.value='';
   };
@@ -2905,9 +2955,20 @@ async function playEp(index){
   loadDiv.innerHTML='<div class="spinner"></div><span style="color:var(--text-3)">Načítám CZ zdroje...</span>';
   wrap.appendChild(loadDiv);
   try{
-    const html=await proxyFetch(`/serial/${ep.slug}/${ep.code}`);
-    const sources=extractSvtSources(html);
+    let html=await proxyFetch(`/serial/${ep.slug}/${ep.code}`);
+    let sources=extractSvtSources(html);
+    // Preferovaný zdroj (např. VOE) SVT někdy doplní se zpožděním — zkus jednou znovu
+    const _pref=getDefaultSource();
+    if(sources.length&&_pref!=='auto'&&!sources.some(s=>s.provider.toLowerCase()===_pref.toLowerCase())){
+      await new Promise(r=>setTimeout(r,2000));
+      try{
+        const html2=await proxyFetch(`/serial/${ep.slug}/${ep.code}`);
+        const s2=extractSvtSources(html2);
+        if(s2.some(s=>s.provider.toLowerCase()===_pref.toLowerCase())){html=html2;sources=s2;}
+      }catch{}
+    }
     if(!sources.length)throw new Error('Epizoda zatím nemá dostupné zdroje');
+    sources=sortSourcesByUserOrder(sources);
     state.svtSources=sources;
     stopSubTimer();_sub.offsetMs=0;
     loadAiSubs(html).then(found=>{
@@ -3412,4 +3473,5 @@ Object.assign(window, {
   browseLoadMore,
   svtNewCardClick,
   registerPushNotifications, unregisterPushNotifications,
+  moveSrcOrder,
 });
