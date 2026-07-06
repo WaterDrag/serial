@@ -1680,8 +1680,7 @@ function renderHistoryContent(){
   const activeFilter=document.querySelector('.filter-chip.active')?.dataset.filter||'all';
   const container=document.getElementById('historyPageContent');
   if(!container)return;
-  // Plánované = oblíbené bez jediné zhlédnuté epizody
-  let items=_historyTab==='favs'?getFavs():_historyTab==='planned'?getFavs().filter(a=>getAnimeWatchStatus(a.id)==='none'):getHistory();
+  let items=_historyTab==='favs'?getFavs():getHistory();
   if(activeFilter==='active'){
     if(_favActiveIds===null){
       container.innerHTML='<div style="text-align:center;padding:60px 0;color:var(--text-3);"><div class="spinner" style="margin:0 auto;"></div></div>';
@@ -1701,7 +1700,7 @@ function renderHistoryContent(){
   else if(sort==='score')items.sort((a,b)=>(b.score||0)-(a.score||0));
   else if(sort==='year')items.sort((a,b)=>(b.year||0)-(a.year||0));
   if(!items.length){
-    container.innerHTML=`<div style="text-align:center;padding:80px 0;color:var(--text-3);font-size:14px;font-weight:600;">${_historyTab==='favs'?'Žádné oblíbené anime.':_historyTab==='planned'?'Nic v plánu — všechny oblíbené už máš rozkoukané.':'Žádná historie sledování.'}</div>`;
+    container.innerHTML=`<div style="text-align:center;padding:80px 0;color:var(--text-3);font-size:14px;font-weight:600;">${_historyTab==='favs'?'Žádné oblíbené anime.':'Žádná historie sledování.'}</div>`;
     return;
   }
   // Primary: dedicated fav CZ scan cache; fallback: svtNewSeries store
@@ -2166,8 +2165,7 @@ function renderCalendar(){
     const shown=items.slice(0,3);
     html+=`<div class="cal-cell${ds===todayStr?' today':''}${items.length?' has-eps':''}" onclick="openCalDay('${ds}')">
       <div class="cal-daynum">${d}</div>
-      ${shown.map(i=>`<div class="cal-ep-chip" title="${i.title} E${i.ep}">${i.title}<span> E${i.ep}</span></div>`).join('')}
-      ${items.length>3?`<div class="cal-more">+${items.length-3} další</div>`:''}
+      ${items.length?`<div class="cal-posters">${shown.map(i=>`<div class="cal-ep-poster" title="${i.title} — E${i.ep}"><img src="${i.poster}" loading="lazy"><span>E${i.ep}</span></div>`).join('')}${items.length>3?`<div class="cal-more">+${items.length-3}</div>`:''}</div>`:''}
     </div>`;
   }
   grid.innerHTML=html;
