@@ -2543,6 +2543,25 @@ async function _runSvtScan(updateTs=true){
   const _prefs=getCfg().notifPrefs||{titulky:true,dabing:false};
   let changed=false;
 
+  // Ověřená mapa slug→TMDB ID z jiných částí appky (sledování přes SVT,
+  // badge scan oblíbených) — spolehlivější než TMDB fulltext ze slugu
+  const favSlugMap={};
+  try{
+    const c=JSON.parse(localStorage.getItem(_SVT_FAV_CZ_KEY)||'{}');
+    for(const[id,e]of Object.entries(c))if(e?.slug)favSlugMap[e.slug]=parseInt(id);
+  }catch{}
+  try{
+    const s=_getSvtState();
+    for(const[id,e]of Object.entries(s))if(e?.slug)favSlugMap[e.slug]=parseInt(id);
+  }catch{}
+  // Doplň z Firebase (globální slugy) oblíbené, které v lokálních cache chybí
+  try{
+    const mappedIds=new Set(Object.values(favSlugMap));
+    const missing=getFavs().filter(f=>!mappedIds.has(f.id)).slice(0,40);
+    const metas=await Promise.allSettled(missing.map(f=>getGlobalSvtSlug(f.id).then(meta=>({id:f.id,slug:meta?.slug||null}))));
+    for(const r of metas)if(r.status==='fulfilled'&&r.value.slug)favSlugMap[r.value.slug]=r.value.id;
+  }catch{}
+
   // Zpracuje jednu epizodu ze zdroje: aktualizuje store, dohledá TMDB ID
   // a vytvoří notifikaci, pokud je seriál v oblíbených a jazyk sedí preferencím.
   async function processEp(slug,season,episode,hasTit,hasDab,title,thumb){
@@ -2577,12 +2596,19 @@ async function _runSvtScan(updateTs=true){
       }catch{}
       changed=true;
     }
+    // Ověřená mapa má přednost — opraví chybějící/špatné TMDB ID ze slugu
+    if(favSlugMap[slug]&&store[slug].tmdbId!==favSlugMap[slug]){
+      store[slug].tmdbId=favSlugMap[slug];
+      store[slug].tmdbDone=true;
+      changed=true;
+    }
     // Zvoneček: každá epizoda + jazyk (titulky/dabing) = samostatná událost
     if(store[slug].tmdbId&&favIds.has(store[slug].tmdbId)){
       const epK=`${season}_${episode}`;
       const nl=store[slug].notifLangs||(store[slug].notifLangs={});
       const done=nl[epK]||{tit:false,dab:false};
-      const fav={id:store[slug].tmdbId,title:store[slug].title};
+      const favInfo=getFavs().find(f=>f.id===store[slug].tmdbId);
+      const fav={id:store[slug].tmdbId,title:favInfo?.title||store[slug].title};
       const _poster=store[slug].tmdbPoster||null;
       if(hasTit&&!done.tit&&_prefs.titulky!==false){
         await _createSvtNotif(fav,{slug,isDub:false,poster:_poster},{s:season,e:episode});

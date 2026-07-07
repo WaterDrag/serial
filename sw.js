@@ -1,8 +1,6 @@
 // WaterStream Service Worker — push notifications
 // Served from the app root so it has full scope
-
-// Prázdný fetch handler — vyžadováno pro instalovatelnost PWA na Androidu
-self.addEventListener('fetch', () => {});
+// (Fetch handler není potřeba — Chrome 106+ instaluje PWA i bez něj.)
 
 self.addEventListener('push', event => {
   if (!event.data) return;
