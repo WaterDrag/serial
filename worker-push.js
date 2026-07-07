@@ -173,7 +173,8 @@ async function runCron(env) {
   const session = env.SVT_SESSION;
   if (!session) { console.log('[CRON] SVT_SESSION not set'); return; }
 
-  const svtHdrs = { 'Cookie': `SESSION=${session}`, 'User-Agent': 'Mozilla/5.0' };
+  // SVT_SESSION může být samotná hodnota, nebo celý cookie řetězec (obsahuje '=')
+  const svtHdrs = { 'Cookie': session.includes('=') ? session : `SESSION=${session}`, 'User-Agent': 'Mozilla/5.0' };
 
   // Set SVT filter: všechny anime, všechny nové epizody
   try {

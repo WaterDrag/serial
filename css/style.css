@@ -335,6 +335,14 @@ input,select,textarea{font-family:inherit;outline:none}
 .notif-dd-item.read{opacity:.4;}
 .notif-dd-item.read:hover{opacity:.65;}
 
+/* ── Rychlé srdíčko na kartách ── */
+.card-fav-btn{position:absolute;top:8px;left:8px;z-index:3;background:rgba(0,0,0,.55);border:none;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;color:#fff;opacity:.85;cursor:pointer;font-size:15px;line-height:1;transition:all .15s;padding:0;}
+.card-fav-btn:hover{transform:scale(1.18);opacity:1;}
+.card-fav-btn.on{color:#f43f5e;opacity:1;}
+.similar-fav-btn{margin-left:auto;background:none;border:none;font-size:17px;line-height:1;cursor:pointer;color:var(--text-3);flex-shrink:0;padding:4px 6px;transition:all .15s;}
+.similar-fav-btn:hover{transform:scale(1.2);}
+.similar-fav-btn.on{color:#f43f5e;}
+
 /* ── Spodní mobilní navigace ── */
 .mobile-nav{display:none;}
 @media(max-width:768px){

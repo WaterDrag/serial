@@ -35,7 +35,10 @@
 <main class="main">
   <div class="history-page-top">
     <div>
-      <h2 class="history-page-title">Moje sledování</h2>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <h2 class="history-page-title" style="margin:0;">Moje sledování</h2>
+        <button onclick="openWrapped()" title="Souhrn tvého sledování" style="background:var(--surface);border:1px solid var(--border);color:var(--text-2);border-radius:20px;padding:5px 13px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-2)'">🎁 Přehled</button>
+      </div>
       <div id="historyStats" class="history-stats"></div>
     </div>
     <div class="history-controls">

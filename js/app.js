@@ -1154,7 +1154,7 @@ function subSeek(deltaMs){
 }
 function subTogglePause(){
   if(!_sub.active)return;
-  const btn=document.getElementById('subPauseBarBtn');
+  const btn=_wsEl('subPauseBarBtn');
   if(_sub.paused){resumeSubTimer();if(btn)btn.textContent='⏸';}
   else{pauseSubTimer();if(btn)btn.textContent='▶';}
 }
@@ -1185,11 +1185,11 @@ function _subTick(){
     elapsed=performance.now()-_sub.startMs;
   }
   const cue=_sub.cues.find(c=>elapsed>=c.start&&elapsed<=c.end);
-  const el=document.getElementById('aiSubText');
+  const el=_wsEl('aiSubText');
   if(el)el.textContent=cue?cue.cz:'';
   const ti=document.getElementById('subTimeInput');
   if(ti&&document.activeElement!==ti)ti.value=_msToTimeStr(elapsed);
-  const td=document.getElementById('subTimeDisp');if(td)td.textContent=_msToTimeStr(elapsed);
+  const td=_wsEl('subTimeDisp');if(td)td.textContent=_msToTimeStr(elapsed);
   requestAnimationFrame(_subTick);
 }
 
@@ -1217,7 +1217,7 @@ function startSubTimer(){
   _sub.startMs=performance.now()-_sub.offsetMs;
   _sub.active=true;
   _sub.paused=false;
-  const overlay=document.getElementById('aiSubOverlay');
+  const overlay=_wsEl('aiSubOverlay');
   if(overlay)overlay.style.display='block';
   _subSetBtnState(true);
   requestAnimationFrame(_subTick);
@@ -1232,7 +1232,7 @@ function stopSubTimer(){
   _sub.fileName='';
   _removeNativeTrack();
   _sub.lang='sk';
-  const overlay=document.getElementById('aiSubOverlay');
+  const overlay=_wsEl('aiSubOverlay');
   if(overlay)overlay.style.display='none';
   _subSetBtnState(false);
 }
@@ -1242,7 +1242,7 @@ function pauseSubTimer(){
   _sub.paused=true;
   _sub.pausedAt=performance.now();
   // skrýt titulkový text
-  const el=document.getElementById('aiSubText');
+  const el=_wsEl('aiSubText');
   if(el)el.textContent='';
   _subSetBtnState(true);
 }
@@ -1534,6 +1534,12 @@ function initSearch(){
 function goToAnime(id){clearTimeout(toastTO);window.location.href=`anime.html?id=${id}`;}
 function goHome(){clearTimeout(toastTO);window.location.href='index.html';}
 
+/* Prvky přehrávače mohou být přesunuté do PiP okna — hledej v obou dokumentech */
+let _pipWin=null;
+function _wsEl(id){
+  return document.getElementById(id)||(_pipWin&&!_pipWin.closed?_pipWin.document.getElementById(id):null);
+}
+
 /* Spodní navigace na mobilu (vkládá se na všechny stránky) */
 function initMobileNav(){
   if(document.querySelector('.mobile-nav'))return;
@@ -1549,6 +1555,58 @@ function initMobileNav(){
   nav.innerHTML=items.map(([href,ico,label,p])=>
     `<a href="${href}" class="${p===page?'active':''}"><span class="mn-ico">${ico}</span>${label}</a>`).join('');
   document.body.appendChild(nav);
+}
+
+/* ══ PLOVOUCÍ PŘEHRÁVAČ (Document Picture-in-Picture) ═══════════════════
+   Přesune celý playerWrap (včetně iframe A vrstvy AI titulků) do plovoucího
+   okna nad ostatními aplikacemi. Titulky fungují — jsou to naše HTML prvky. */
+function _updatePipBtn(on){
+  const btn=document.getElementById('pipBtn');
+  if(btn)btn.innerHTML=on?'⏏ Zpět':'🗔 PiP';
+}
+async function togglePlayerPiP(){
+  if(_pipWin&&!_pipWin.closed){_pipWin.close();return;}
+  if(!('documentPictureInPicture' in window)){
+    showToast('Plovoucí okno podporuje jen Chrome/Edge na PC');return;
+  }
+  const wrap=_wsEl('playerWrap');
+  if(!wrap)return;
+  try{
+    _pipWin=await documentPictureInPicture.requestWindow({width:720,height:405});
+  }catch(e){showToast('PiP se nepodařilo otevřít: '+e.message);return;}
+  // Zkopíruj styly do PiP okna
+  for(const ss of document.styleSheets){
+    try{
+      const css=[...ss.cssRules].map(r=>r.cssText).join('\n');
+      const st=_pipWin.document.createElement('style');
+      st.textContent=css;
+      _pipWin.document.head.appendChild(st);
+    }catch{
+      if(ss.href){
+        const l=_pipWin.document.createElement('link');
+        l.rel='stylesheet';l.href=ss.href;
+        _pipWin.document.head.appendChild(l);
+      }
+    }
+  }
+  _pipWin.document.body.style.cssText='margin:0;background:#000;overflow:hidden;';
+  // Placeholder na původním místě
+  const ph=document.createElement('div');
+  ph.id='pipPlaceholder';
+  ph.style.cssText='aspect-ratio:16/9;display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r-xl);color:var(--text-3);font-weight:700;font-size:14px;cursor:pointer;';
+  ph.innerHTML='🗔 Přehrává se v plovoucím okně<span style="font-size:12px;font-weight:600;">Kliknutím vrátíš video zpět</span>';
+  ph.onclick=()=>{if(_pipWin&&!_pipWin.closed)_pipWin.close();};
+  wrap.parentNode.insertBefore(ph,wrap);
+  _pipWin.document.body.appendChild(wrap);
+  wrap.style.height='100vh';
+  _pipWin.addEventListener('pagehide',()=>{
+    const holder=document.getElementById('pipPlaceholder');
+    wrap.style.height='';
+    if(holder){holder.parentNode.insertBefore(wrap,holder);holder.remove();}
+    _pipWin=null;
+    _updatePipBtn(false);
+  });
+  _updatePipBtn(true);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1841,6 +1899,65 @@ function renderHistoryStats(){
   }
   el.innerHTML=`<span>📺 ${total} epizod</span><span>▶ ${watching} rozkoukáno</span><span>✅ ${completed} dokončeno</span>`;
 }
+/* ══ WATERSTREAM WRAPPED — souhrn sledování ═════════════════════════════ */
+function openWrapped(){
+  const w=getWatched();
+  const perShow={};let total=0;
+  for(const[k,eps]of Object.entries(w)){
+    const m=k.match(/^(\d+)_s\d+$/);if(!m)continue;
+    const c=Object.values(eps).filter(Boolean).length;if(!c)continue;
+    perShow[m[1]]=(perShow[m[1]]||0)+c;total+=c;
+  }
+  const ids=Object.keys(perShow);
+  const completed=ids.filter(id=>getAnimeWatchStatus(id)==='completed').length;
+  const watching=ids.filter(id=>getAnimeWatchStatus(id)==='watching').length;
+  const _lookup=id=>{const n=parseInt(id);return getFavs().find(f=>f.id===n)||getHistory().find(h=>h.id===n)||null;};
+  const topIds=ids.sort((a,b)=>perShow[b]-perShow[a]).slice(0,3);
+  const topHtml=topIds.map((id,i)=>{
+    const info=_lookup(id);
+    return `<div style="display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.06);border-radius:12px;padding:10px 14px;">
+      <span style="font-size:20px;font-weight:900;color:var(--accent);width:28px;">${i+1}.</span>
+      ${info?.cover?`<img src="${info.cover}" style="width:36px;height:52px;object-fit:cover;border-radius:6px;">`:''}
+      <span style="flex:1;font-weight:700;font-size:14px;">${info?.title||'Anime #'+id}</span>
+      <span style="color:var(--text-3);font-size:13px;font-weight:800;">${perShow[id]} ep</span>
+    </div>`;
+  }).join('');
+  const genreCount={};
+  for(const f of getFavs())for(const g of f.genres||[])genreCount[g]=(genreCount[g]||0)+1;
+  const topGenres=Object.entries(genreCount).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([g])=>g);
+  const ov=document.createElement('div');
+  ov.id='wrappedOverlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:3000;background:linear-gradient(160deg,#0d1421 0%,#082f49 55%,#0c4a6e 100%);overflow-y:auto;display:flex;align-items:center;justify-content:center;padding:24px;';
+  ov.innerHTML=`<button onclick="closeWrapped()" style="position:fixed;top:18px;right:24px;background:none;border:none;color:#fff;font-size:28px;cursor:pointer;line-height:1;z-index:1;">✕</button>
+  <div style="max-width:520px;width:100%;display:flex;flex-direction:column;gap:14px;animation:fadeUp .4s ease;">
+    <h2 style="margin:0 0 4px;font-size:26px;font-weight:900;color:#fff;">🎁 Tvůj WaterStream přehled</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div style="background:rgba(255,255,255,.07);border-radius:16px;padding:18px;text-align:center;">
+        <div style="font-size:38px;font-weight:900;color:var(--accent);">${total}</div>
+        <div style="color:var(--text-2);font-size:13px;font-weight:700;">zhlédnutých epizod</div>
+      </div>
+      <div style="background:rgba(255,255,255,.07);border-radius:16px;padding:18px;text-align:center;">
+        <div style="font-size:38px;font-weight:900;color:var(--accent);">${ids.length}</div>
+        <div style="color:var(--text-2);font-size:13px;font-weight:700;">seriálů</div>
+      </div>
+      <div style="background:rgba(255,255,255,.07);border-radius:16px;padding:18px;text-align:center;">
+        <div style="font-size:38px;font-weight:900;color:#4ade80;">${completed}</div>
+        <div style="color:var(--text-2);font-size:13px;font-weight:700;">dokončených</div>
+      </div>
+      <div style="background:rgba(255,255,255,.07);border-radius:16px;padding:18px;text-align:center;">
+        <div style="font-size:38px;font-weight:900;color:#fbbf24;">${watching}</div>
+        <div style="color:var(--text-2);font-size:13px;font-weight:700;">rozkoukaných</div>
+      </div>
+    </div>
+    ${topHtml?`<div style="color:#fff;font-weight:800;font-size:15px;margin-top:6px;">🏆 Nejsledovanější</div>${topHtml}`:''}
+    ${topGenres.length?`<div style="color:#fff;font-weight:800;font-size:15px;margin-top:6px;">🎭 Tvoje žánry</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">${topGenres.map(g=>`<span style="background:rgba(255,255,255,.1);border-radius:20px;padding:7px 16px;color:#fff;font-size:13px;font-weight:700;">${g}</span>`).join('')}</div>`:''}
+  </div>`;
+  ov.onclick=e=>{if(e.target===ov)closeWrapped();};
+  document.body.appendChild(ov);
+}
+function closeWrapped(){document.getElementById('wrappedOverlay')?.remove();}
+
 function initHistoryPage(){
   initSearch();
   renderHistoryStats();
@@ -1955,6 +2072,10 @@ async function loadSimilar(animeId){
         </div>
       </div>`;
     }).join('');
+    listEl.querySelectorAll('.similar-item').forEach((node,i)=>{
+      const r=items[i];if(!r)return;
+      _attachSimilarFav(node,{id:r.id,title:r.name,cover:r.poster_path?TMDB_IMG+r.poster_path:'',score:r.vote_average?Math.round(r.vote_average*10):null,year:parseInt((r.first_air_date||'').slice(0,4))||null});
+    });
   }catch{section.style.display='none';}
 }
 
@@ -2004,6 +2125,7 @@ function renderCards(items,append=false){
     const epBadge=`${a.episodes||a.nextAiringEpisode?.episode-1||'?'} ep`;
     card.innerHTML=`<div class="card-poster"><img src="${a.coverImage?.large||''}" alt="${title}" loading="lazy">${a.averageScore?`<div class="card-rating">★ ${(a.averageScore/10).toFixed(1)}</div>`:''}<div class="card-ep-badge">${epBadge}</div><div class="card-overlay"><div class="play-icon"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg></div></div></div><div class="card-title">${title}</div><div class="card-meta">${a.seasonYear||''} ${a.genres?.[0]?`· ${a.genres[0]}`:''}</div>`;
     card.onclick=()=>goToAnime(a.id);
+    _attachCardFav(card,a);
     grid.appendChild(card);
   });
 }
@@ -2312,6 +2434,10 @@ async function openCalDay(ds){
           </div>
         </div>`).join('')
       :'<div style="color:var(--text-3);font-size:13px;">Nic dalšího nenalezeno.</div>';
+    el.querySelectorAll('.similar-item').forEach((node,i)=>{
+      const r=others[i];if(!r)return;
+      _attachSimilarFav(node,{id:r.id,title:r.name,cover:r.poster_path?TMDB_IMG+r.poster_path:'',score:r.vote_average?Math.round(r.vote_average*10):null,year:parseInt((r.first_air_date||'').slice(0,4))||null});
+    });
   }catch{
     const el=document.getElementById('calDayOthers');
     if(el)el.innerHTML='<div style="color:var(--danger);font-size:13px;">Chyba načítání.</div>';
@@ -2328,6 +2454,31 @@ async function initCalendarPage(){
     const grid=document.getElementById('calGrid');
     if(grid)grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;color:var(--danger);padding:40px;">Chyba: ${e.message}</div>`;
   }
+}
+
+/* ══ DLOUHO ROZKOUKANÉ — rozkoukané, na které jsem 30+ dní nesáhl ═══════ */
+function initHomeAbandoned(){
+  const section=document.getElementById('homeAbandonedSection');
+  const row=document.getElementById('homeAbandonedRow');
+  if(!section||!row)return;
+  const now=Date.now();
+  const cutoff=30*24*3600*1000;
+  const items=getHistory()
+    .filter(h=>now-h.ts>cutoff&&getAnimeWatchStatus(h.id)==='watching')
+    .slice(0,5);
+  if(!items.length)return;
+  section.style.display='block';
+  row.innerHTML=items.map(h=>{
+    const days=Math.floor((now-h.ts)/86400000);
+    return `<div class="new-ep-card" onclick="goToAnime(${h.id})" style="cursor:pointer;">
+      <div class="new-ep-thumb">
+        <img src="${h.cover||''}" loading="lazy">
+        <div class="new-ep-badge">🕸️</div>
+      </div>
+      <div class="new-ep-title">${h.title||''}</div>
+      <div class="new-ep-date">Před ${days} dny</div>
+    </div>`;
+  }).join('');
 }
 
 /* ══ NÁHODNÝ VÝBĚR Z OBLÍBENÝCH ═════════════════════════════════════════ */
@@ -2673,6 +2824,7 @@ function initHomePage(){
     if(svtLabel)svtLabel.style.display=state.filter==='SVT_NEW'?'flex':'none';
     if(state.filter==='SVT_NEW')loadSvtNewEpisodes();else loadFilter(state.filter);
     initHomeContinue().catch(()=>{});
+    initHomeAbandoned();
     initHomeNotifications();
     initNotifBadge();
     checkSvtNotificationsBackground();
@@ -2715,7 +2867,9 @@ async function browseLoad(append=false){
     unique.forEach((a,i)=>{
       const t=getTitle(a);const card=document.createElement('div');card.className='anime-card';card.style.animationDelay=`${(i%12)*0.03}s`;
       card.innerHTML=`<div class="card-poster"><img src="${a.coverImage?.large||''}" alt="${t}" loading="lazy">${a.averageScore?`<div class="card-rating">★ ${(a.averageScore/10).toFixed(1)}</div>`:''}<div class="card-ep-badge">${a.episodes||'?'} ep</div><div class="card-overlay"><div class="play-icon"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg></div></div></div><div class="card-title">${t}</div><div class="card-meta">${a.seasonYear||''} ${a.genres?.[0]?`· ${a.genres[0]}`:''}</div>`;
-      card.onclick=()=>goToAnime(a.id);grid.appendChild(card);
+      card.onclick=()=>goToAnime(a.id);
+      _attachCardFav(card,a);
+      grid.appendChild(card);
     });
     if(loadMoreBtn)loadMoreBtn.style.display=hasMore?'':'none';
     const sortLabel={TRENDING_DESC:'Trending',POPULARITY_DESC:'Populární',SCORE_DESC:'Dle hodnocení',START_DATE_DESC:'Nejnovější'}[_browseSort]||'Výsledky';
@@ -2919,17 +3073,17 @@ async function playAnimeggEp(ep,wrap,ph,isDub){
 }
 function animeggSwitchSubDub(isDub){
   state.animeggIsDub=isDub;
-  const wrap=document.getElementById('playerWrap');
-  const ph=document.getElementById('playerPlaceholder');
+  const wrap=_wsEl('playerWrap');
+  const ph=_wsEl('playerPlaceholder');
   const ep=state.episodes[state.currentEpIndex];
   if(ep)playAnimeggEp(ep,wrap,ph,isDub);
 }
 function animeggLoadSource(url,btn){
   if(btn){document.querySelectorAll('#sourceBtns .source-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
   destroyHls();
-  const wrap=document.getElementById('playerWrap');
+  const wrap=_wsEl('playerWrap');
   wrap.querySelectorAll('video,iframe').forEach(el=>el.remove());
-  document.getElementById('playerPlaceholder').style.display='none';
+  _wsEl('playerPlaceholder').style.display='none';
   const vid=document.createElement('video');
   vid.controls=true;vid.autoplay=true;
   vid.style.cssText='position:absolute;inset:0;width:100%;height:100%;background:#000;';
@@ -3250,6 +3404,36 @@ function submitManualWatch(){
   renderEpList();updateMarkSeasonBtn();
 }
 
+/* Rychlé přidání do oblíbených přímo z karty (home, hledání, kalendář, podobné) */
+function quickFav(ev,d){
+  ev.stopPropagation();ev.preventDefault();
+  let f=getFavs();const idx=f.findIndex(x=>x.id===d.id);
+  let on;
+  if(idx>=0){f.splice(idx,1);on=false;showToast('Odebráno z oblíbených');}
+  else{f.unshift({id:d.id,title:d.title,cover:d.cover||'',score:d.score||null,year:d.year||null,genres:d.genres||[]});on=true;showToast('Přidáno do oblíbených',true);}
+  setFavs(f);syncFavsToWorker();
+  document.querySelectorAll(`.card-fav-btn[data-id="${d.id}"],.similar-fav-btn[data-id="${d.id}"]`).forEach(b=>b.classList.toggle('on',on));
+}
+function _attachCardFav(card,a){
+  const poster=card.querySelector('.card-poster');
+  if(!poster)return;
+  const btn=document.createElement('button');
+  btn.className='card-fav-btn'+(getFavs().some(f=>f.id===a.id)?' on':'');
+  btn.dataset.id=a.id;
+  btn.title='Přidat / odebrat z oblíbených';
+  btn.innerHTML='♥';
+  btn.onclick=ev=>quickFav(ev,{id:a.id,title:getTitle(a),cover:a.coverImage?.large||'',score:a.averageScore||null,year:a.seasonYear||null,genres:a.genres||[]});
+  poster.appendChild(btn);
+}
+function _attachSimilarFav(node,d){
+  const btn=document.createElement('button');
+  btn.className='similar-fav-btn'+(getFavs().some(f=>f.id===d.id)?' on':'');
+  btn.dataset.id=d.id;
+  btn.title='Přidat / odebrat z oblíbených';
+  btn.innerHTML='♥';
+  btn.onclick=ev=>quickFav(ev,d);
+  node.appendChild(btn);
+}
 function toggleFav(){
   if(!state.currentAnime)return;
   let f=getFavs();const idx=f.findIndex(x=>x.id===state.currentAnime.id);
@@ -3382,9 +3566,9 @@ async function playEp(index){
 
   renderEpList();updateNavBtns();updateWatchedBtn();stopSubTimer();destroyHls();
 
-  const wrap=document.getElementById('playerWrap');
+  const wrap=_wsEl('playerWrap');
   wrap.querySelectorAll('video,iframe').forEach(el=>el.remove());
-  const ph=document.getElementById('playerPlaceholder');
+  const ph=_wsEl('playerPlaceholder');
   ph.style.display='none';
   document.getElementById('sourceRow').style.display='none';
   document.getElementById('sourceBtns').innerHTML='';
@@ -3509,9 +3693,9 @@ function loadSvtSource(index){
   const src=state.svtSources?.[index];if(!src)return;
   state.svtSourceIndex=index;
   document.querySelectorAll('#sourceBtns .source-btn').forEach((b,i)=>b.classList.toggle('active',i===index));
-  const wrap=document.getElementById('playerWrap');
+  const wrap=_wsEl('playerWrap');
   wrap.querySelectorAll('video,iframe').forEach(el=>el.remove());
-  document.getElementById('playerPlaceholder').style.display='none';
+  _wsEl('playerPlaceholder').style.display='none';
   try{
     const iframe=document.createElement('iframe');
     iframe.src=resolveIframeUrl(src.b64);
@@ -3525,7 +3709,7 @@ function loadSvtSource(index){
     },15000);
     iframe.onload=()=>clearTimeout(timer);
     // Overlay musí být poslední child aby byl nad iframem
-    const ov=document.getElementById('aiSubOverlay');
+    const ov=_wsEl('aiSubOverlay');
     if(ov)wrap.appendChild(ov);
   }catch(e){
     const next=index+1;
@@ -3537,8 +3721,8 @@ function playManualUrl(){
   const input=document.getElementById('manualUrlInput');if(!input)return;
   const url=input.value.trim();
   if(!url){showToast('Zadej URL streamu',false);return;}
-  const wrap=document.getElementById('playerWrap');
-  const ph=document.getElementById('playerPlaceholder');
+  const wrap=_wsEl('playerWrap');
+  const ph=_wsEl('playerPlaceholder');
   wrap.querySelectorAll('video,iframe').forEach(el=>el.remove());
   ph.style.display='none';destroyHls();
   const isM3u8=/\.m3u8(\?|$)/i.test(url);
@@ -3618,7 +3802,7 @@ function updateWatchedBtn(){
 let _redirectFs=false;
 let _fsMoveListener=null,_subCtrlHideTO=null;
 function _showSubCtrlBar(){
-  const bar=document.getElementById('subCtrlBar');
+  const bar=_wsEl('subCtrlBar');
   if(!bar)return;
   bar.style.opacity='1';bar.style.pointerEvents='auto';
   clearTimeout(_subCtrlHideTO);
@@ -3626,7 +3810,7 @@ function _showSubCtrlBar(){
 }
 
 function togglePlayerFullscreen(){
-  const wrap=document.getElementById('playerWrap');
+  const wrap=_wsEl('playerWrap');
   if(!wrap)return;
   const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
   if(isFs){document.exitFullscreen?.().catch(()=>{});document.webkitExitFullscreen?.();}
@@ -3634,18 +3818,18 @@ function togglePlayerFullscreen(){
 }
 
 function initPlayerFullscreen(){
-  const wrap=document.getElementById('playerWrap');
+  const wrap=_wsEl('playerWrap');
   if(!wrap)return;
 
   // Keep bar visible while mouse is over it
-  const bar=document.getElementById('subCtrlBar');
+  const bar=_wsEl('subCtrlBar');
   if(bar){
     bar.addEventListener('mouseenter',()=>clearTimeout(_subCtrlHideTO));
     bar.addEventListener('mouseleave',()=>{_subCtrlHideTO=setTimeout(()=>{bar.style.opacity='0';bar.style.pointerEvents='none';},1500);});
   }
 
   // Hotspot in top-right corner captures mouseenter even over cross-origin iframes
-  const hotspot=document.getElementById('subCtrlHotspot');
+  const hotspot=_wsEl('subCtrlHotspot');
   if(hotspot)hotspot.addEventListener('mouseenter',_showSubCtrlBar);
 
   const _enterFs=()=>{
@@ -3706,6 +3890,7 @@ async function initWatchPage(){
 
   renderWatchNotifs();
   loadSimilar(animeId).catch(()=>{});
+  if(!('documentPictureInPicture' in window)){const pb=document.getElementById('pipBtn');if(pb)pb.style.display='none';}
 
   let cached=null;
   try{
@@ -3726,7 +3911,7 @@ async function initWatchPage(){
     state.currentSeason=cached.currentSeason||season;
     state.episodes=cached.episodes||[];
   }else{
-    const ph=document.getElementById('playerPlaceholder');
+    const ph=_wsEl('playerPlaceholder');
     if(ph){ph.style.display='flex';ph.innerHTML='<div class="spinner"></div><span style="color:var(--text-3)">Načítám anime…</span>';}
     try{
       const anime=await fetchAnimeDetail(animeId);
@@ -3759,8 +3944,8 @@ async function initWatchPage(){
         }
       }
     }catch(e){
-      if(document.getElementById('playerPlaceholder'))
-        document.getElementById('playerPlaceholder').innerHTML=`<span style="color:var(--danger)">Chyba: ${e.message}</span>`;
+      if(_wsEl('playerPlaceholder'))
+        _wsEl('playerPlaceholder').innerHTML=`<span style="color:var(--danger)">Chyba: ${e.message}</span>`;
       return;
     }
   }
@@ -3785,7 +3970,7 @@ async function initWatchPage(){
 
   // Epizoda nenalezena — SVT čísluje relativně (1-N v každé sérii), TMDB absolutně
   if(epIndex<0&&state.provider==='svt'&&state.svtSlug&&state.svtTvShowId){
-    const ph=document.getElementById('playerPlaceholder');
+    const ph=_wsEl('playerPlaceholder');
     if(ph)ph.innerHTML='<div class="spinner"></div><span style="color:var(--text-3)">Hledám epizodu v jiných sériích…</span>';
     let absoluteOffset=0;
     for(let s=1;s<=15;s++){
@@ -3828,7 +4013,7 @@ async function initWatchPage(){
     state.currentEpIndex=epIndex;
     playEp(epIndex);
   }else{
-    const ph=document.getElementById('playerPlaceholder');
+    const ph=_wsEl('playerPlaceholder');
     if(ph){ph.style.display='flex';ph.innerHTML=`<span style="color:var(--warn)">Epizoda ${epNum} nenalezena</span>`;}
   }
   updateNavBtns();
@@ -3996,4 +4181,5 @@ Object.assign(window, {
   markAllNotifsRead, exportUserData, importUserData,
   calNav, openCalDay,
   switchGenre, importFromAniList,
+  quickFav, togglePlayerPiP, openWrapped, closeWrapped,
 });
