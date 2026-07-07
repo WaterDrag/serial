@@ -182,11 +182,18 @@ async function runCron(env) {
     await fetch(SVT_BASE+'/', { method:'POST', headers:{ ...svtHdrs, 'Content-Type':'application/x-www-form-urlencoded' }, body:'animeEpisodes=2&setFilterAnime=1' });
   } catch {}
 
-  let html;
-  try {
-    const r = await fetch(SVT_BASE+'/?ajaxTVShows=true&page=0', { headers: svtHdrs });
-    html = await r.text();
-  } catch (e) { console.error('[CRON] SVT fetch failed:', e.message); return; }
+  // Víc stránek feedu — jedna strana = jen ~24 nejnovějších epizod, takže
+  // epizoda oblíbeného po pár hodinách „odscrolluje" z dosahu.
+  let html = '';
+  for (let pg = 0; pg < 5; pg++) {
+    try {
+      const r = await fetch(SVT_BASE+`/?ajaxTVShows=true&page=${pg}`, { headers: svtHdrs });
+      const part = await r.text();
+      if (!part || !part.includes('/serial/')) break;
+      html += part;
+    } catch (e) { if (pg === 0) { console.error('[CRON] SVT fetch failed:', e.message); return; } break; }
+  }
+  if (!html) return;
 
   const state = await env.PUSH_KV.get(KV_SVT_STATE, { type:'json' }) || {};
   const subs  = await listSubs(env.PUSH_KV);

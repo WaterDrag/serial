@@ -1411,8 +1411,9 @@ async function _createSvtNotif(fav,meta,ep){
   const key=`${fav.id}_s${s2}e${e2}_${meta.isDub?'dab':'tit'}`;
   const existing=_getSvtNotifs();
   if(existing.find(n=>n.key===key))return;
-  let poster=null;
-  try{const td=await tmdbFetch(`/tv/${fav.id}`);poster=td?.poster_path||null;}catch{}
+  // Poster přednostně z volajícího (store) — jinak fallback TMDB dotaz
+  let poster=meta.poster||null;
+  if(!poster){try{const td=await tmdbFetch(`/tv/${fav.id}`);poster=td?.poster_path||null;}catch{}}
   existing.push({key,showId:fav.id,showName:fav.title||'—',showPoster:poster,isDub:meta.isDub||false,season:ep.s,episode:ep.e,ts:Date.now(),read:false});
   _saveSvtNotifs(existing);
 }
@@ -2501,7 +2502,7 @@ function randomFav(){
 const _SVT_SERIES_KEY='svt_new_series_v6';
 const _SVT_SERIES_TTL=21*24*3600*1000;
 const _SVT_SERIES_TS='svt_series_ts';
-const _SVT_SERIES_INTERVAL=3*3600*1000;
+const _SVT_SERIES_INTERVAL=90*60*1000;
 const _svtTmdbCache={};
 
 function _getSvtNewSeries(){try{return JSON.parse(localStorage.getItem(_SVT_SERIES_KEY)||'{}');}catch{return{};}}
@@ -2525,9 +2526,17 @@ async function _runSvtScan(updateTs=true){
     await fetch(proxy+'/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'episodes=1&setFilter=1'});
     await fetch(proxy+'/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'animeEpisodes=2&setFilterAnime=1'});
   }catch{}
-  let html;
-  try{html=await proxyFetch('/?ajaxTVShows=true&page=0');}
-  catch{try{html=await proxyFetch('/');}catch{return;}}
+  // Feed čteme přes víc stránek — jedna strana = jen ~24 nejnovějších epizod,
+  // takže epizoda oblíbeného po pár hodinách „odscrolluje". 5 stran ≈ 120 epizod.
+  let html='';
+  for(let pg=0;pg<5;pg++){
+    try{
+      const part=await proxyFetch(`/?ajaxTVShows=true&page=${pg}`);
+      if(!part||!part.includes('/serial/'))break;
+      html+=part;
+    }catch{if(pg===0){try{html=await proxyFetch('/');}catch{return;}}break;}
+  }
+  if(!html){return;}
 
   const store=_getSvtNewSeries();
   const favIds=new Set(getFavs().map(f=>f.id));
@@ -2591,12 +2600,13 @@ async function _runSvtScan(updateTs=true){
       const nl=store[slug].notifLangs||(store[slug].notifLangs={});
       const done=nl[epK]||{tit:false,dab:false};
       const fav={id:store[slug].tmdbId,title:store[slug].title};
+      const _poster=store[slug].tmdbPoster||null;
       if(hasTit&&!done.tit&&_prefs.titulky!==false){
-        await _createSvtNotif(fav,{slug,isDub:false},{s:season,e:episode});
+        await _createSvtNotif(fav,{slug,isDub:false,poster:_poster},{s:season,e:episode});
         done.tit=true;nl[epK]=done;changed=true;
       }
       if(hasDab&&!done.dab&&!!_prefs.dabing){
-        await _createSvtNotif(fav,{slug,isDub:true},{s:season,e:episode});
+        await _createSvtNotif(fav,{slug,isDub:true,poster:_poster},{s:season,e:episode});
         done.dab=true;nl[epK]=done;changed=true;
       }
     }
