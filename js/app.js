@@ -606,7 +606,7 @@ const state={
   episodes:[],allSeasons:{},availableSeasons:[],currentSeason:1,
   svtSlug:null,svtTvShowId:null,svtEpisodes:[],svtIsDub:false,
   provider:'svt',
-  modes:{svt:false,animegg:false},
+  modes:{svt:false,animegg:false,ss:false,hanime:false},
   animeggSlug:null,animeggEpisodes:[],animeggHasDub:false,animeggIsDub:false,
   svtSources:[],svtSourceIndex:0,
   page:1,filter:'TRENDING',animeMode:'anime',svtOnly:true,genre:'',
@@ -729,8 +729,12 @@ async function searchAnime(q){
   return(data.results||[]).map(normalizeTmdb);
 }
 async function fetchAnimeDetail(id){
-  const data=await tmdbFetch(`/tv/${id}`);
-  return normalizeTmdb(data);
+  const data=await tmdbFetch(`/tv/${id}`,{append_to_response:'alternative_titles'});
+  const norm=normalizeTmdb(data);
+  // Alternativní tituly (romaji apod.) — SVT často používá romaji slug
+  const alts=(data.alternative_titles?.results||[]).map(t=>t.title).filter(Boolean);
+  norm.synonyms=[...new Set(alts)].slice(0,8);
+  return norm;
 }
 
 
@@ -754,7 +758,10 @@ function scoreSlugMatch(query,slug){
     else if(sWords.some(sw=>sw.startsWith(qw)&&sw.length<=qw.length*1.5))matches+=0.6;
   }
   const coverage=qWords.length/sWords.length;
-  return(matches/qWords.length)*Math.min(1,coverage*1.5);
+  let score=(matches/qWords.length)*Math.min(1,coverage*1.5);
+  // Slug se slovy navíc (např. "-vigilantes") nesmí remizovat s přesnou shodou
+  if(sWords.length>qWords.length)score-=0.02*(sWords.length-qWords.length);
+  return score;
 }
 async function findSvtSlug(anime,onProgress){
   const queries=new Set([anime.title?.english,anime.title?.romaji,anime.title?.native,...(anime.synonyms||[])].filter(Boolean));
