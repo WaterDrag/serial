@@ -2507,16 +2507,19 @@ const _svtTmdbCache={};
 function _getSvtNewSeries(){try{return JSON.parse(localStorage.getItem(_SVT_SERIES_KEY)||'{}');}catch{return{};}}
 function _saveSvtNewSeries(obj){localStorage.setItem(_SVT_SERIES_KEY,JSON.stringify(obj));}
 
-let _svtScanRunning=false;
-async function checkSvtNewSeriesBackground(force=false,updateTs=true){
-  if(!getProxy())return;
-  if(_svtScanRunning)return;
+let _svtScanPromise=null;
+function checkSvtNewSeriesBackground(force=false,updateTs=true){
+  if(!getProxy())return Promise.resolve();
+  // Už běží scan — připoj se k němu místo tichého zahození
+  if(_svtScanPromise)return _svtScanPromise;
   if(!force){
     const lastCheck=parseInt(localStorage.getItem(_SVT_SERIES_TS)||'0');
-    if(Date.now()-lastCheck<_SVT_SERIES_INTERVAL)return;
+    if(Date.now()-lastCheck<_SVT_SERIES_INTERVAL)return Promise.resolve();
   }
-  _svtScanRunning=true;
-  try{
+  _svtScanPromise=_runSvtScan(updateTs).finally(()=>{_svtScanPromise=null;});
+  return _svtScanPromise;
+}
+async function _runSvtScan(updateTs=true){
   const proxy=getProxy();
   try{
     await fetch(proxy+'/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'episodes=1&setFilter=1'});
@@ -2629,7 +2632,6 @@ async function checkSvtNewSeriesBackground(force=false,updateTs=true){
   }
   if(updateTs)localStorage.setItem(_SVT_SERIES_TS,Date.now().toString());
   _updateNotifBadge(_getSvtNotifs().filter(n=>!n.read).length);
-  }finally{_svtScanRunning=false;}
 }
 
 async function loadSvtNewEpisodes(){
