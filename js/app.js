@@ -2542,24 +2542,11 @@ async function _runSvtScan(updateTs=true){
   const favIds=new Set(getFavs().map(f=>f.id));
   const _prefs=getCfg().notifPrefs||{titulky:true,dabing:false};
   let changed=false;
-  const re=/href="\/serial\/([a-z0-9-]+)\/(s(\d+)e(\d+))"/gi;
-  let m;
-  while((m=re.exec(html))!==null){
-    const slug=m[1],season=parseInt(m[3]),episode=parseInt(m[4]);
-    const segStart=Math.max(0,m.index-100);
-    const segEnd=Math.min(html.length,m.index+900);
-    const seg=html.slice(segStart,segEnd);
-    const titleM=seg.match(/<span class="episode-number nunito">\s*<span>([^<]+)<\/span>/);
-    const altM=seg.match(/alt="([^"]+)"/);
-    const title=(titleM?titleM[1]:altM?altM[1]:slug.replace(/-/g,' ')).trim()
-      .replace(/&amp;/g,'&').replace(/&#039;/g,"'").replace(/&quot;/g,'"');
-    const thumbM=seg.match(/src="(\/assets\/img\/uploads\/wallpapers\/[^"]+)"/);
-    const thumb=thumbM?thumbM[1]:'';
-    const hasTit=/episode-cc/.test(seg);
-    const hasDab=/episode-dub/.test(seg);
 
+  // Zpracuje jednu epizodu ze zdroje: aktualizuje store, dohledá TMDB ID
+  // a vytvoří notifikaci, pokud je seriál v oblíbených a jazyk sedí preferencím.
+  async function processEp(slug,season,episode,hasTit,hasDab,title,thumb){
     if(store[slug]){
-      // Known series — update if this is a newer episode than last seen
       const prev=store[slug].lastEpSeen||`${store[slug].season||1}_1`;
       const[ps,pe]=prev.split('_').map(Number);
       if(season>ps||(season===ps&&episode>pe)){
@@ -2568,12 +2555,10 @@ async function _runSvtScan(updateTs=true){
         store[slug].lastEpSeen=`${season}_${episode}`;
         changed=true;
       }else if(season===ps&&episode===pe&&(store[slug].hasTit!==hasTit||store[slug].hasDab!==hasDab)){
-        // Stejná epizoda, ale přibyly titulky/dabing
-        store[slug].hasTit=hasTit;store[slug].hasDab=hasDab;
+        store[slug].hasTit=store[slug].hasTit||hasTit;store[slug].hasDab=store[slug].hasDab||hasDab;
         changed=true;
       }
     }else{
-      // New slug — record and look up TMDB ID
       store[slug]={title,thumb,season,episode,firstSeen:Date.now(),hasTit,hasDab,lastEpSeen:`${season}_${episode}`};
       try{
         const slugTitle=slug.replace(/-/g,' ');
@@ -2592,9 +2577,7 @@ async function _runSvtScan(updateTs=true){
       }catch{}
       changed=true;
     }
-    // Zvoneček: každá epizoda a každý jazyk (titulky/dabing) = samostatná
-    // událost, jako na SVT. Sleduje se per-epizoda co už bylo oznámeno,
-    // takže dabing přidaný později k epizodě s titulky se oznámí taky.
+    // Zvoneček: každá epizoda + jazyk (titulky/dabing) = samostatná událost
     if(store[slug].tmdbId&&favIds.has(store[slug].tmdbId)){
       const epK=`${season}_${episode}`;
       const nl=store[slug].notifLangs||(store[slug].notifLangs={});
@@ -2610,6 +2593,36 @@ async function _runSvtScan(updateTs=true){
         done.dab=true;nl[epK]=done;changed=true;
       }
     }
+  }
+
+  // 1) SVT notifikační panel — přesně epizody TVÝCH SVT-oblíbených, včetně
+  //    starších, které už vypadly z veřejného feedu (sub_as=tit, dub_as=dab)
+  try{
+    const nHtml=await proxyFetch('/?ajaxNotifyTVShows=true');
+    const alerts=nHtml.split(/<a href="\/serial\//).slice(1);
+    for(const a of alerts){
+      const hm=a.match(/^([a-z0-9-]+)\/s(\d+)e(\d+)\?notify=/i);
+      if(!hm)continue;
+      const block=a.slice(0,600);
+      await processEp(hm[1],parseInt(hm[2]),parseInt(hm[3]),/sub_as/.test(block),/dub_as/.test(block),hm[1].replace(/-/g,' '),'');
+    }
+  }catch{}
+
+  // 2) Veřejný feed (page 0-4) — širší záběr novinek pro CZ Novinky sekci
+  const re=/href="\/serial\/([a-z0-9-]+)\/(s(\d+)e(\d+))"/gi;
+  let m;
+  while((m=re.exec(html))!==null){
+    const slug=m[1],season=parseInt(m[3]),episode=parseInt(m[4]);
+    const segStart=Math.max(0,m.index-100);
+    const segEnd=Math.min(html.length,m.index+900);
+    const seg=html.slice(segStart,segEnd);
+    const titleM=seg.match(/<span class="episode-number nunito">\s*<span>([^<]+)<\/span>/);
+    const altM=seg.match(/alt="([^"]+)"/);
+    const title=(titleM?titleM[1]:altM?altM[1]:slug.replace(/-/g,' ')).trim()
+      .replace(/&amp;/g,'&').replace(/&#039;/g,"'").replace(/&quot;/g,'"');
+    const thumbM=seg.match(/src="(\/assets\/img\/uploads\/wallpapers\/[^"]+)"/);
+    const thumb=thumbM?thumbM[1]:'';
+    await processEp(slug,season,episode,/episode-cc/.test(seg),/episode-dub/.test(seg),title,thumb);
   }
   // Backfill: retry TMDB lookup for entries that previously failed
   for(const[slug,entry]of Object.entries(store)){

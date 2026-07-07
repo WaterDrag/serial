@@ -199,32 +199,43 @@ async function runCron(env) {
   const subs  = await listSubs(env.PUSH_KV);
   if (!subs.length) { console.log('[CRON] No subscribers'); return; }
 
-  // Parse new episodes from SVT feed
-  const re       = /href="\/serial\/([a-z0-9-]+)\/(s(\d+)e(\d+))"/gi;
   const newEps   = [];
   const seenSlug = new Set();
-  let m;
 
-  while ((m = re.exec(html)) !== null) {
-    const slug = m[1], season = parseInt(m[3]), ep = parseInt(m[4]);
-    if (seenSlug.has(slug)) continue;
-    seenSlug.add(slug);
-
-    const segStart = Math.max(0, m.index - 100);
-    const segEnd   = Math.min(html.length, m.index + 900);
-    const seg      = html.slice(segStart, segEnd);
-    const hasTit   = /episode-cc/.test(seg);
-    const hasDab   = /episode-dub/.test(seg);
-
-    // Per-epizoda sledování oznámených jazyků — titulky mohou přibýt
-    // až několik dní po vydání epizody, pak se oznámí dodatečně
+  // Zaeviduje epizodu (z panelu i feedu) do newEps, pokud jazyk ještě nebyl oznámen
+  const addEp = (slug, season, ep, hasTit, hasDab) => {
     const epKey    = `${season}_${ep}`;
+    const dedup    = slug + '|' + epKey;
+    if (seenSlug.has(dedup)) return;
+    seenSlug.add(dedup);
     const notified = (state[slug] && state[slug].notifLangs && state[slug].notifLangs[epKey]) || { tit:false, dab:false };
     const newTit   = hasTit && !notified.tit;
     const newDab   = hasDab && !notified.dab;
-
     state[slug] = { ...(state[slug] || {}), lastEp: epKey };
     if (newTit || newDab) newEps.push({ slug, season, ep, epKey, hasTit, hasDab, newTit, newDab });
+  };
+
+  // 1) SVT notifikační panel — epizody SVT-oblíbených i starší mimo feed
+  try {
+    const nr = await fetch(SVT_BASE+'/?ajaxNotifyTVShows=true', { headers: svtHdrs });
+    const nHtml = await nr.text();
+    for (const a of nHtml.split(/<a href="\/serial\//).slice(1)) {
+      const hm = a.match(/^([a-z0-9-]+)\/s(\d+)e(\d+)\?notify=/i);
+      if (!hm) continue;
+      const block = a.slice(0, 600);
+      addEp(hm[1], parseInt(hm[2]), parseInt(hm[3]), /sub_as/.test(block), /dub_as/.test(block));
+    }
+  } catch (e) { console.warn('[CRON] notify panel:', e.message); }
+
+  // 2) Veřejný feed (page 0-4)
+  const re = /href="\/serial\/([a-z0-9-]+)\/(s(\d+)e(\d+))"/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const slug = m[1], season = parseInt(m[3]), ep = parseInt(m[4]);
+    const segStart = Math.max(0, m.index - 100);
+    const segEnd   = Math.min(html.length, m.index + 900);
+    const seg      = html.slice(segStart, segEnd);
+    addEp(slug, season, ep, /episode-cc/.test(seg), /episode-dub/.test(seg));
   }
 
   if (!newEps.length) {
