@@ -2629,8 +2629,10 @@ async function _runSvtScan(updateTs=true){
     for(const a of alerts){
       const hm=a.match(/^([a-z0-9-]+)\/s(\d+)e(\d+)\?notify=/i);
       if(!hm)continue;
-      const block=a.slice(0,600);
-      await processEp(hm[1],parseInt(hm[2]),parseInt(hm[3]),/sub_as/.test(block),/dub_as/.test(block),hm[1].replace(/-/g,' '),'');
+      const block=a.slice(0,1200); // jazykový tag bývá ~760 znaků za hrefem
+      const hasTit=/sub_as/.test(block)||/titulk/i.test(block);
+      const hasDab=/dub_as/.test(block)||/dabing/i.test(block);
+      await processEp(hm[1],parseInt(hm[2]),parseInt(hm[3]),hasTit,hasDab,hm[1].replace(/-/g,' '),'');
     }
   }catch{}
 

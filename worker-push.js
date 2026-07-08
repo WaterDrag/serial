@@ -222,8 +222,10 @@ async function runCron(env) {
     for (const a of nHtml.split(/<a href="\/serial\//).slice(1)) {
       const hm = a.match(/^([a-z0-9-]+)\/s(\d+)e(\d+)\?notify=/i);
       if (!hm) continue;
-      const block = a.slice(0, 600);
-      addEp(hm[1], parseInt(hm[2]), parseInt(hm[3]), /sub_as/.test(block), /dub_as/.test(block));
+      const block = a.slice(0, 1200); // jazykový tag bývá ~760 znaků za hrefem
+      const hasTit = /sub_as/.test(block) || /titulk/i.test(block);
+      const hasDab = /dub_as/.test(block) || /dabing/i.test(block);
+      addEp(hm[1], parseInt(hm[2]), parseInt(hm[3]), hasTit, hasDab);
     }
   } catch (e) { console.warn('[CRON] notify panel:', e.message); }
 
