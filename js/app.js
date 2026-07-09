@@ -4082,18 +4082,14 @@ async function initWatchPage(){
       state.currentSeason=season;
 
       if(ph)ph.innerHTML='<div class="spinner"></div><span style="color:var(--text-3)">Hledám CZ zdroj…</span>';
-      const slug=await findSvtSlug(anime);
-      if(slug){
-        state.svtSlug=slug;
-        let tvShowId=null;
-        for(const path of[`/serial/${slug}`,`/serial/${slug}/s01e01`]){
-          try{const h=await proxyFetch(path);tvShowId=extractTvShowId(h);if(tvShowId)break;}catch{}
-        }
-        if(tvShowId){
-          state.svtTvShowId=tvShowId;
-          const eps=await svtEpisodes(slug,season,tvShowId);
-          state.allSeasons[season]=eps;state.episodes=eps;
-          state.provider='svt';state.modes.svt=true;
+      const cachedSlug=await getGlobalSvtSlug(anime.id);
+      const slug=cachedSlug?.slug||await findSvtSlug(anime);
+      // loadSvtBySlug naplní availableSeasons (přepínač sérií) + svtTvShowId
+      if(slug&&await loadSvtBySlug(slug,anime)){
+        state.provider='svt';state.modes.svt=true;
+        // Načti požadovanou sérii, pokud loadSvtBySlug zvolil jinou
+        if(!state.allSeasons[season]&&state.availableSeasons.includes(season)){
+          try{state.allSeasons[season]=await svtEpisodes(slug,season,state.svtTvShowId);}catch{}
         }
       }
       if(!state.modes.svt){
