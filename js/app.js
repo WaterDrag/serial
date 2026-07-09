@@ -2751,6 +2751,7 @@ async function loadSvtNewEpisodes(){
       const tmdbParams={sort_by:'first_air_date.desc','first_air_date.gte':gte,'first_air_date.lte':today,page:1};
       if(state.animeMode==='anime'){tmdbParams.with_genres='16';tmdbParams.with_original_language='ja';}
       else if(state.animeMode==='no-anime'){tmdbParams.without_genres='16';}
+      if(state.genre)tmdbParams.with_genres=tmdbParams.with_genres?`${tmdbParams.with_genres},${state.genre}`:state.genre;
       const data=await tmdbFetch('/discover/tv',tmdbParams);
       const items=(data.results||[]).map(normalizeTmdb);
       if(!items.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:40px;">Žádná nová anime za posledních 21 dní.</div>';return;}

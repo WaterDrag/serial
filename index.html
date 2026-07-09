@@ -35,39 +35,6 @@
 <main class="main">
   <section class="hero" id="heroSection"></section>
 
-  <div class="section-label">
-    <div class="dot"></div>
-    <h2 id="sectionTitle">Výběr</h2>
-    <button onclick="randomFav()" title="Náhodný výběr z oblíbených" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text-2);border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-2)'">🎲 Co sledovat</button>
-  </div>
-
-  <div class="filter-tabs" id="mainFilterRow">
-    <button class="filter-tab active" onclick="switchFilter(this,'TRENDING')">Výběr</button>
-    <button class="filter-tab" onclick="switchFilter(this,'POPULAR')">Populární</button>
-    <button class="filter-tab" onclick="switchFilter(this,'TOP_RATED')">Top hodnocení</button>
-    <button class="filter-tab" id="seasonalTab" onclick="switchFilter(this,'SEASONAL')">Tato sezona</button>
-    <button class="filter-tab" onclick="switchFilter(this,'SVT_NEW')">CZ Novinky</button>
-  </div>
-  <div class="filter-tabs" id="animeModeRow" style="margin-top:-8px;">
-    <button class="filter-tab active" onclick="switchAnimeFilter(this,'anime')">Jen anime</button>
-    <button class="filter-tab" onclick="switchAnimeFilter(this,'all')">Vše</button>
-    <button class="filter-tab" onclick="switchAnimeFilter(this,'no-anime')">Skrýt anime</button>
-    <label id="svtOnlyLabel" style="display:none;align-items:center;gap:6px;margin-left:auto;font-size:13px;color:var(--text-2);cursor:pointer;">
-      <input type="checkbox" id="svtOnlyToggle" checked onchange="toggleSvtOnly(this)" style="accent-color:var(--accent);width:15px;height:15px;">
-      Jen SVT
-    </label>
-  </div>
-  <div class="filter-tabs" id="genreRow" style="margin-top:-8px;">
-    <button class="filter-chip active" data-genre="" onclick="switchGenre(this,'')">Vše žánry</button>
-    <button class="filter-chip" data-genre="10759" onclick="switchGenre(this,'10759')">Akce</button>
-    <button class="filter-chip" data-genre="35" onclick="switchGenre(this,'35')">Komedie</button>
-    <button class="filter-chip" data-genre="18" onclick="switchGenre(this,'18')">Drama</button>
-    <button class="filter-chip" data-genre="10765" onclick="switchGenre(this,'10765')">Sci-Fi & Fantasy</button>
-    <button class="filter-chip" data-genre="9648" onclick="switchGenre(this,'9648')">Mystery</button>
-    <button class="filter-chip" data-genre="80" onclick="switchGenre(this,'80')">Krimi</button>
-    <button class="filter-chip" data-genre="10751" onclick="switchGenre(this,'10751')">Rodinné</button>
-  </div>
-
   <!-- Pokračovat ve sledování -->
   <div id="homeContinueSection" style="display:none;margin-bottom:2.5rem;">
     <div class="section-label" style="margin-bottom:10px;">
@@ -97,6 +64,39 @@
       </div>
     </div>
     <div class="new-eps-row" id="homeNewEpsGrid"></div>
+  </div>
+
+  <div class="section-label">
+    <div class="dot"></div>
+    <h2 id="sectionTitle">Výběr</h2>
+    <button onclick="randomFav()" title="Náhodný výběr z oblíbených" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text-2);border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-2)'">🎲 Co sledovat</button>
+  </div>
+
+  <div class="filter-tabs" id="mainFilterRow">
+    <button class="filter-tab active" onclick="switchFilter(this,'TRENDING')">Výběr</button>
+    <button class="filter-tab" onclick="switchFilter(this,'POPULAR')">Populární</button>
+    <button class="filter-tab" onclick="switchFilter(this,'TOP_RATED')">Top hodnocení</button>
+    <button class="filter-tab" id="seasonalTab" onclick="switchFilter(this,'SEASONAL')">Tato sezona</button>
+    <button class="filter-tab" onclick="switchFilter(this,'SVT_NEW')">CZ Novinky</button>
+  </div>
+  <div class="filter-tabs" id="animeModeRow" style="margin-top:-8px;">
+    <button class="filter-tab active" onclick="switchAnimeFilter(this,'anime')">Jen anime</button>
+    <button class="filter-tab" onclick="switchAnimeFilter(this,'all')">Vše</button>
+    <button class="filter-tab" onclick="switchAnimeFilter(this,'no-anime')">Skrýt anime</button>
+    <label id="svtOnlyLabel" style="display:none;align-items:center;gap:6px;margin-left:auto;font-size:13px;color:var(--text-2);cursor:pointer;">
+      <input type="checkbox" id="svtOnlyToggle" checked onchange="toggleSvtOnly(this)" style="accent-color:var(--accent);width:15px;height:15px;">
+      Jen SVT
+    </label>
+  </div>
+  <div class="filter-tabs" id="genreRow" style="margin-top:-8px;">
+    <button class="filter-chip active" data-genre="" onclick="switchGenre(this,'')">Vše</button>
+    <button class="filter-chip" data-genre="10759" onclick="switchGenre(this,'10759')">Akce</button>
+    <button class="filter-chip" data-genre="35" onclick="switchGenre(this,'35')">Komedie</button>
+    <button class="filter-chip" data-genre="18" onclick="switchGenre(this,'18')">Drama</button>
+    <button class="filter-chip" data-genre="10765" onclick="switchGenre(this,'10765')">Sci-Fi & Fantasy</button>
+    <button class="filter-chip" data-genre="9648" onclick="switchGenre(this,'9648')">Mystery</button>
+    <button class="filter-chip" data-genre="80" onclick="switchGenre(this,'80')">Krimi</button>
+    <button class="filter-chip" data-genre="10751" onclick="switchGenre(this,'10751')">Rodinné</button>
   </div>
 
   <div class="anime-grid" id="animeGrid"></div>
