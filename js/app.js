@@ -1561,6 +1561,48 @@ function initHeaderFavBtn(){
   bell.parentElement.insertBefore(a,bell);
 }
 
+/* Kostka „Co sledovat" v hlavičce s výběrem náhodný / oblíbený */
+function initHeaderDiceBtn(){
+  const bell=document.querySelector('.header-right [onclick="openNotifModal()"]');
+  if(!bell||document.getElementById('headerDiceBtn'))return;
+  const btn=document.createElement('button');
+  btn.id='headerDiceBtn';
+  btn.className='btn-icon';
+  btn.title='Co sledovat';
+  btn.textContent='🎲';
+  btn.onclick=e=>{e.stopPropagation();toggleDiceMenu(btn);};
+  const anchor=document.getElementById('headerFavBtn')||bell;
+  anchor.parentElement.insertBefore(btn,anchor);
+}
+function toggleDiceMenu(btn){
+  const ex=document.getElementById('diceMenu');
+  if(ex){ex.remove();return;}
+  const wrap=btn.parentElement;wrap.style.position='relative';
+  const dd=document.createElement('div');
+  dd.id='diceMenu';dd.className='notif-dropdown';dd.style.width='220px';
+  dd.innerHTML=`
+    <div class="dice-menu-item" onclick="document.getElementById('diceMenu')?.remove();randomAny()">🎲 Náhodný<span>ze všech anime</span></div>
+    <div class="dice-menu-item" onclick="document.getElementById('diceMenu')?.remove();randomFav()">❤️ Oblíbený<span>z tvých oblíbených</span></div>`;
+  wrap.appendChild(dd);
+  setTimeout(()=>{
+    function oc(e){if(!dd.contains(e.target)&&!btn.contains(e.target)){dd.remove();document.removeEventListener('click',oc);}}
+    document.addEventListener('click',oc);
+  },10);
+}
+async function randomAny(){
+  showToast('🎲 Vybírám…');
+  try{
+    const today=new Date().toISOString().split('T')[0];
+    const page=1+Math.floor(Math.random()*15);
+    const data=await tmdbFetch('/discover/tv',{sort_by:'popularity.desc',with_genres:'16',with_original_language:'ja','first_air_date.lte':today,'vote_count.gte':50,page});
+    const results=(data.results||[]).filter(r=>r.poster_path);
+    if(!results.length){showToast('Nic nenalezeno, zkus to znovu');return;}
+    const pick=results[Math.floor(Math.random()*results.length)];
+    showToast(`🎲 ${pick.name}`,true);
+    setTimeout(()=>goToAnime(pick.id),650);
+  }catch(e){showToast('Chyba: '+e.message);}
+}
+
 /* Spodní navigace na mobilu (vkládá se na všechny stránky) */
 function initMobileNav(){
   if(document.querySelector('.mobile-nav'))return;
@@ -4221,6 +4263,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   initMobileNav();
   initHeaderFavBtn();
+  initHeaderDiceBtn();
   const page = document.body.dataset.page;
   if(page === 'home') initHomePage();
   else if(page === 'anime') initAnimePage();
@@ -4262,4 +4305,5 @@ Object.assign(window, {
   calNav, openCalDay,
   switchGenre, importFromAniList,
   quickFav, togglePlayerPiP, openWrapped, closeWrapped,
+  randomAny, toggleDiceMenu,
 });

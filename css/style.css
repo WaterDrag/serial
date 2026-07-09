@@ -335,6 +335,12 @@ input,select,textarea{font-family:inherit;outline:none}
 .notif-dd-item.read{opacity:.4;}
 .notif-dd-item.read:hover{opacity:.65;}
 
+/* ── Kostka „Co sledovat" dropdown ── */
+.dice-menu-item{display:flex;flex-direction:column;gap:2px;padding:11px 16px;cursor:pointer;transition:background .12s;border-bottom:1px solid var(--border);color:var(--text-1);font-size:14px;font-weight:700;}
+.dice-menu-item:last-child{border-bottom:none;}
+.dice-menu-item:hover{background:var(--surface);}
+.dice-menu-item span{color:var(--text-3);font-size:11px;font-weight:600;}
+
 /* ── Rychlé srdíčko na kartách ── */
 .card-fav-btn{position:absolute;top:8px;left:8px;z-index:3;background:rgba(0,0,0,.55);border:none;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;color:#fff;opacity:.85;cursor:pointer;font-size:15px;line-height:1;transition:all .15s;padding:0;}
 .card-fav-btn:hover{transform:scale(1.18);opacity:1;}
