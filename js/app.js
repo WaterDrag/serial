@@ -2585,13 +2585,15 @@ async function _runSvtScan(updateTs=true){
         store[slug].season=season;store[slug].episode=episode;
         store[slug].hasTit=hasTit;store[slug].hasDab=hasDab;
         store[slug].lastEpSeen=`${season}_${episode}`;
+        store[slug].lastActivity=Date.now(); // nová epizoda → vyskočí nahoru v CZ Novinkách
         changed=true;
       }else if(season===ps&&episode===pe&&(store[slug].hasTit!==hasTit||store[slug].hasDab!==hasDab)){
         store[slug].hasTit=store[slug].hasTit||hasTit;store[slug].hasDab=store[slug].hasDab||hasDab;
+        store[slug].lastActivity=Date.now();
         changed=true;
       }
     }else{
-      store[slug]={title,thumb,season,episode,firstSeen:Date.now(),hasTit,hasDab,lastEpSeen:`${season}_${episode}`};
+      store[slug]={title,thumb,season,episode,firstSeen:Date.now(),lastActivity:Date.now(),hasTit,hasDab,lastEpSeen:`${season}_${episode}`};
       try{
         const slugTitle=slug.replace(/-/g,' ');
         let res=await tmdbFetch('/search/tv',{query:title});
@@ -2685,10 +2687,10 @@ async function _runSvtScan(updateTs=true){
     }catch{}
     changed=true;
   }
-  // Prune entries older than 21 days
+  // Prune podle poslední aktivity — seriál stále vydávající epizody zůstane
   const cutoff=Date.now()-_SVT_SERIES_TTL;
   for(const slug of Object.keys(store)){
-    if(store[slug].firstSeen<cutoff){delete store[slug];changed=true;}
+    if((store[slug].lastActivity||store[slug].firstSeen)<cutoff){delete store[slug];changed=true;}
   }
   if(changed){
     _saveSvtNewSeries(store);
@@ -2707,24 +2709,27 @@ async function loadSvtNewEpisodes(){
   const _render=(store)=>{
     const proxy=getProxy();
     const cutoff=Date.now()-_SVT_SERIES_TTL;
+    const _act=v=>v.lastActivity||v.firstSeen;
     const series=Object.entries(store)
-      .filter(([,v])=>v.firstSeen>cutoff)
+      .filter(([,v])=>_act(v)>cutoff)
+      // Jen čerstvé premiéry — jakmile jsou venku 3+ epizody, seriál skryj
+      .filter(([,v])=>(v.episode||1)<3)
       .filter(([,v])=>{
         if(state.animeMode==='anime')return v.isAnime!==false;
         if(state.animeMode==='no-anime')return v.isAnime===false;
         return true;
       })
-      .sort(([,a],[,b])=>b.firstSeen-a.firstSeen)
+      .sort(([,a],[,b])=>_act(b)-_act(a))
       .map(([slug,v])=>({slug,...v}));
     if(!series.length){
       grid.innerHTML='<div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:40px;">Žádné výsledky pro aktuální filtr.</div>';
       return;
     }
-    grid.innerHTML=series.slice(0,24).map(s=>{
+    grid.innerHTML=series.slice(0,80).map(s=>{
       // Prefer TMDB poster, fallback to SVT thumbnail
       if(s.tmdbId)_svtTmdbCache[s.slug]=s.tmdbId;
       const imgSrc=s.tmdbPoster?`${TMDB_IMG}${s.tmdbPoster}`:(s.thumb?proxy+s.thumb:'');
-      const daysAgo=Math.floor((Date.now()-s.firstSeen)/(24*3600*1000));
+      const daysAgo=Math.floor((Date.now()-(s.lastActivity||s.firstSeen))/(24*3600*1000));
       const timeLabel=daysAgo===0?'Dnes přidáno':daysAgo===1?'Přidáno včera':`Přidáno před ${daysAgo} dny`;
       const badges=[
         s.hasTit?'<span style="font-size:9px;font-weight:800;background:#22c55e;color:#fff;border-radius:4px;padding:1px 5px;line-height:1.6;">TIT</span>':'',

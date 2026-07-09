@@ -35,6 +35,19 @@
 <main class="main">
   <section class="hero" id="heroSection"></section>
 
+  <!-- Nové epizody z oblíbených -->
+  <div id="homeNewEpsSection" style="display:none;margin-bottom:2.5rem;">
+    <div class="section-label" style="margin-bottom:10px;">
+      <div class="dot"></div>
+      <h2 id="homeEpsTitle">Nové epizody z oblíbených</h2>
+      <div style="margin-left:auto;display:flex;gap:6px;">
+        <button class="filter-chip active" id="homeNotifRecent" onclick="switchHomeNotifMode('recent')">Nedávné</button>
+        <button class="filter-chip" id="homeNotifUpcoming" onclick="switchHomeNotifMode('upcoming')">Brzy</button>
+      </div>
+    </div>
+    <div class="new-eps-row" id="homeNewEpsGrid"></div>
+  </div>
+
   <!-- Pokračovat ve sledování -->
   <div id="homeContinueSection" style="display:none;margin-bottom:2.5rem;">
     <div class="section-label" style="margin-bottom:10px;">
@@ -51,19 +64,6 @@
       <h2>Dlouho rozkoukané</h2>
     </div>
     <div class="new-eps-row" id="homeAbandonedRow"></div>
-  </div>
-
-  <!-- Nové epizody z oblíbených -->
-  <div id="homeNewEpsSection" style="display:none;margin-bottom:2.5rem;">
-    <div class="section-label" style="margin-bottom:10px;">
-      <div class="dot"></div>
-      <h2 id="homeEpsTitle">Nové epizody z oblíbených</h2>
-      <div style="margin-left:auto;display:flex;gap:6px;">
-        <button class="filter-chip active" id="homeNotifRecent" onclick="switchHomeNotifMode('recent')">Nedávné</button>
-        <button class="filter-chip" id="homeNotifUpcoming" onclick="switchHomeNotifMode('upcoming')">Brzy</button>
-      </div>
-    </div>
-    <div class="new-eps-row" id="homeNewEpsGrid"></div>
   </div>
 
   <div class="section-label">
