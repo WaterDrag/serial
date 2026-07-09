@@ -1548,6 +1548,19 @@ function _wsEl(id){
   return document.getElementById(id)||(_pipWin&&!_pipWin.closed?_pipWin.document.getElementById(id):null);
 }
 
+/* Odkaz na Oblíbené v hlavičce (vedle zvonečku) — vkládá se na všech stránkách */
+function initHeaderFavBtn(){
+  const bell=document.querySelector('.header-right [onclick="openNotifModal()"]');
+  if(!bell||document.getElementById('headerFavBtn'))return;
+  const a=document.createElement('a');
+  a.id='headerFavBtn';
+  a.href='history.html';
+  a.className='btn-icon';
+  a.title='Oblíbené';
+  a.textContent='❤️';
+  bell.parentElement.insertBefore(a,bell);
+}
+
 /* Spodní navigace na mobilu (vkládá se na všechny stránky) */
 function initMobileNav(){
   if(document.querySelector('.mobile-nav'))return;
@@ -4201,6 +4214,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
   initMobileNav();
+  initHeaderFavBtn();
   const page = document.body.dataset.page;
   if(page === 'home') initHomePage();
   else if(page === 'anime') initAnimePage();
