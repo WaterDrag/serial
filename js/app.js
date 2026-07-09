@@ -3880,17 +3880,33 @@ function playManualUrl(){
 
 
 function updateNavBtns(){
+  const seasons=state.availableSeasons||[];
+  const curIdx=seasons.indexOf(state.currentSeason);
+  const hasPrevSeason=curIdx>0;
+  const hasNextSeason=curIdx>=0&&curIdx<seasons.length-1;
   const prev=document.getElementById('prevEpBtn');
   const next=document.getElementById('nextEpBtn');
-  if(prev)prev.disabled=state.currentEpIndex<=0;
-  if(next)next.disabled=state.currentEpIndex>=state.episodes.length-1;
+  if(prev)prev.disabled=state.currentEpIndex<=0&&!hasPrevSeason;
+  if(next)next.disabled=state.currentEpIndex>=state.episodes.length-1&&!hasNextSeason;
 }
-function navigateEp(d){
+async function navigateEp(d){
   if(d===1&&state.currentEp&&state.currentAnime){
     markEpWatched(state.currentAnime.id,state.currentEp.number,state.currentEp.season||1,true);
   }
   const nx=state.currentEpIndex+d;
-  if(nx>=0&&nx<state.episodes.length)playEp(nx);
+  if(nx>=0&&nx<state.episodes.length){playEp(nx);return;}
+  // Přechod přes hranici série — „Další" na konci skočí do další série (a naopak)
+  const seasons=state.availableSeasons||[];
+  const curIdx=seasons.indexOf(state.currentSeason);
+  try{
+    if(d===1&&curIdx>=0&&curIdx<seasons.length-1){
+      await switchSeason(seasons[curIdx+1]);
+      if(state.episodes.length)playEp(0);
+    }else if(d===-1&&curIdx>0){
+      await switchSeason(seasons[curIdx-1]);
+      if(state.episodes.length)playEp(state.episodes.length-1);
+    }
+  }catch{}
 }
 function toggleWatched(){
   if(!state.currentEp||!state.currentAnime)return;
