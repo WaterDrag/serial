@@ -2406,15 +2406,17 @@ const _CAL_CACHE_KEY='ws_cal_cache_v1';
 let _calDate=null,_calEpMap=null;
 
 async function _loadCalendarData(){
+  const favs=getFavs();
+  const sig=favs.map(f=>f.id).sort((a,b)=>a-b).join(','); // cache neplatná při změně oblíbených
   try{
     const c=JSON.parse(localStorage.getItem(_CAL_CACHE_KEY)||'null');
-    if(c&&Date.now()-c.ts<6*3600*1000){_calEpMap=c.map;return;}
+    if(c&&c.sig===sig&&Date.now()-c.ts<6*3600*1000){_calEpMap=c.map;return;}
   }catch{}
-  const favs=getFavs();
   const map={};
   await Promise.allSettled(favs.map(async f=>{
     const show=await tmdbFetch(`/tv/${f.id}`);
-    const seasons=(show.seasons||[]).filter(s=>s.season_number>0);
+    // Poslední sezóna, která má vůbec epizody — ignoruj oznámené prázdné sezóny
+    const seasons=(show.seasons||[]).filter(s=>s.season_number>0&&(s.episode_count||0)>0);
     if(!seasons.length)return;
     const latest=seasons[seasons.length-1];
     const sd=await tmdbFetch(`/tv/${f.id}/season/${latest.season_number}`);
@@ -2430,7 +2432,7 @@ async function _loadCalendarData(){
     });
   }));
   _calEpMap=map;
-  try{localStorage.setItem(_CAL_CACHE_KEY,JSON.stringify({ts:Date.now(),map}));}catch{}
+  try{localStorage.setItem(_CAL_CACHE_KEY,JSON.stringify({ts:Date.now(),sig,map}));}catch{}
 }
 
 function renderCalendar(){
@@ -2465,27 +2467,48 @@ function calNav(dir){
 async function openCalDay(ds){
   const det=document.getElementById('calDayDetail');if(!det)return;
   det.style.display='block';
-  const favItems=(_calEpMap?.[ds])||[];
   const dayLabel=new Date(ds+'T12:00:00').toLocaleDateString('cs-CZ',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-  const favHtml=favItems.length
-    ?favItems.map(i=>`<div class="similar-item" onclick="window.location.href='watch.html?id=${i.id}&ep=${i.ep}&season=${i.season}'">
+  det.innerHTML=`<h3 style="margin:0 0 12px;font-size:16px;font-weight:800;color:var(--text-1);text-transform:capitalize;">${dayLabel}</h3>
+    <div class="episodes-title" style="margin-bottom:8px;">❤️ Oblíbené</div>
+    <div class="cal-day-grid" id="calDayFavs"></div>
+    <div class="episodes-title" style="margin:16px 0 8px;">Ostatní anime</div>
+    <div class="cal-day-grid" id="calDayOthers"><div style="color:var(--text-3);font-size:13px;"><div class="spinner" style="width:18px;height:18px;border-width:2px;"></div></div></div>`;
+  det.scrollIntoView({behavior:'smooth',block:'nearest'});
+
+  const favItems=(_calEpMap?.[ds])||[];
+  const realFavIds=new Set(getFavs().map(f=>f.id));
+  const mapIds=new Set(favItems.map(i=>i.id));
+
+  // Oblíbené: z mapy (s číslem epizody) + případné oblíbené z TMDB výsledků, které mapa minula
+  const renderFavs=(extra)=>{
+    const el=document.getElementById('calDayFavs');if(!el)return;
+    const parts=favItems.map(i=>`<div class="similar-item" onclick="window.location.href='watch.html?id=${i.id}&ep=${i.ep}&season=${i.season}'">
         <img src="${i.poster}" class="similar-thumb" loading="lazy">
         <div class="similar-info">
           <div class="similar-title">${i.title}</div>
           <div class="similar-sub">S${String(i.season).padStart(2,'0')} E${String(i.ep).padStart(2,'0')} · ❤️ oblíbené</div>
         </div>
-      </div>`).join('')
-    :'<div style="color:var(--text-3);font-size:13px;padding:4px 0;">Žádné oblíbené tento den nevychází.</div>';
-  det.innerHTML=`<h3 style="margin:0 0 12px;font-size:16px;font-weight:800;color:var(--text-1);text-transform:capitalize;">${dayLabel}</h3>
-    <div class="episodes-title" style="margin-bottom:8px;">❤️ Oblíbené</div>
-    <div class="cal-day-grid">${favHtml}</div>
-    <div class="episodes-title" style="margin:16px 0 8px;">Ostatní anime</div>
-    <div class="cal-day-grid" id="calDayOthers"><div style="color:var(--text-3);font-size:13px;"><div class="spinner" style="width:18px;height:18px;border-width:2px;"></div></div></div>`;
-  det.scrollIntoView({behavior:'smooth',block:'nearest'});
+      </div>`);
+    for(const r of(extra||[])){
+      parts.push(`<div class="similar-item" onclick="goToAnime(${r.id})">
+        <img src="${r.poster_path?TMDB_IMG+r.poster_path:''}" class="similar-thumb" loading="lazy">
+        <div class="similar-info">
+          <div class="similar-title">${r.name}</div>
+          <div class="similar-sub">❤️ oblíbené</div>
+        </div>
+      </div>`);
+    }
+    el.innerHTML=parts.length?parts.join(''):'<div style="color:var(--text-3);font-size:13px;padding:4px 0;">Žádné oblíbené tento den nevychází.</div>';
+  };
+  renderFavs([]);
+
   try{
     const data=await tmdbFetch('/discover/tv',{'air_date.gte':ds,'air_date.lte':ds,with_genres:'16',with_original_language:'ja',sort_by:'popularity.desc'});
-    const favIds=new Set(favItems.map(i=>i.id));
-    const others=(data?.results||[]).filter(r=>!favIds.has(r.id)&&r.poster_path).slice(0,12);
+    const results=(data?.results||[]).filter(r=>r.poster_path);
+    // Oblíbené, které mapa neměla (jiná sezóna apod.) → přidej do Oblíbené, ne do Ostatní
+    const extraFavs=results.filter(r=>realFavIds.has(r.id)&&!mapIds.has(r.id));
+    const others=results.filter(r=>!realFavIds.has(r.id)).slice(0,12);
+    renderFavs(extraFavs);
     const el=document.getElementById('calDayOthers');
     if(!el)return;
     el.innerHTML=others.length
