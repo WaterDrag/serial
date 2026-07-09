@@ -2548,7 +2548,10 @@ function initHomeAbandoned(){
 function randomFav(){
   const favs=getFavs();
   if(!favs.length){showToast('Nemáš žádné oblíbené seriály');return;}
-  const pick=favs[Math.floor(Math.random()*favs.length)];
+  // Jen nezačaté a rozkoukané — dokoukané vynech
+  const pool=favs.filter(f=>getAnimeWatchStatus(f.id)!=='completed');
+  if(!pool.length){showToast('Všechny oblíbené už máš dokoukané 🎉');return;}
+  const pick=pool[Math.floor(Math.random()*pool.length)];
   showToast(`🎲 ${pick.title}`,true);
   setTimeout(()=>goToAnime(pick.id),600);
 }
